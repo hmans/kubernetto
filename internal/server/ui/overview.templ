@@ -28,6 +28,45 @@ templ OverviewView(state PageState) {
 					</button>
 				}
 			</div>
+			<section class="overview-panel">
+				<div class="overview-panel-head">
+					<div>
+						<h3>Pod Usage</h3>
+						if state.Overview.Metrics.Source != "" || state.Overview.Metrics.Window != "" {
+							<div class="updated">{ metricsSourceLabel(state.Overview.Metrics) }</div>
+						}
+					</div>
+					<span class={ metricsBadgeClass(state.Overview.Metrics) }>{ metricsBadgeLabel(state.Overview.Metrics) }</span>
+				</div>
+				if !state.Overview.Metrics.Available {
+					<div class="empty">{ state.Overview.Metrics.Message }</div>
+				} else if len(state.Overview.PodUsage) == 0 {
+					<div class="empty">No pod usage samples are cached yet.</div>
+				} else {
+					<div class="pod-usage-list">
+						for _, pod := range state.Overview.PodUsage {
+							<article class="pod-usage-item">
+								<div class="pod-usage-title">
+									<strong>{ pod.Name }</strong>
+									<span>{ pod.Namespace }</span>
+								</div>
+								<svg class="usage-timeline" viewBox="0 0 120 36" preserveAspectRatio="none" role="img" aria-label="CPU and memory usage timeline">
+									<polyline class="timeline-line memory" points={ memorySparklinePoints(pod.Samples) }></polyline>
+									<polyline class="timeline-line cpu" points={ cpuSparklinePoints(pod.Samples) }></polyline>
+								</svg>
+								<div class="usage-row">
+									<span>CPU</span>
+									<strong>{ pod.CPU }</strong>
+								</div>
+								<div class="usage-row">
+									<span>MEM</span>
+									<strong>{ pod.Memory }</strong>
+								</div>
+							</article>
+						}
+					</div>
+				}
+			</section>
 			if len(state.Overview.Identity) > 0 {
 				<section class="overview-panel">
 					<div class="overview-panel-head">

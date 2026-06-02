@@ -35,11 +35,13 @@ type ResourceStore struct {
 	ready   atomic.Bool
 	started atomic.Bool
 
-	mu            sync.RWMutex
-	serverVersion string
-	versionError  string
-	errorMessage  string
-	podUsage      map[string]corev1.ResourceList
+	mu              sync.RWMutex
+	serverVersion   string
+	versionError    string
+	errorMessage    string
+	podUsage        map[string]corev1.ResourceList
+	metricsState    MetricsState
+	podUsageHistory map[string][]UsageSample
 
 	pods         corelisters.PodLister
 	events       corelisters.EventLister
@@ -68,6 +70,11 @@ func NewResourceStore(cluster *Cluster, logger *slog.Logger) *ResourceStore {
 
 	store.factory = informers.NewSharedInformerFactory(cluster.Clientset, 0)
 	store.podUsage = map[string]corev1.ResourceList{}
+	store.podUsageHistory = map[string][]UsageSample{}
+	store.metricsState = MetricsState{Message: "Checking metrics availability.", Window: "Last 60 minutes"}
+	if cluster.MetricsClient == nil {
+		store.metricsState.Message = "No metrics.k8s.io client is configured."
+	}
 
 	pods := store.factory.Core().V1().Pods()
 	events := store.factory.Core().V1().Events()
@@ -312,6 +319,7 @@ func (s *ResourceStore) loadServerVersion(ctx context.Context) {
 func (s *ResourceStore) pollPodMetrics(ctx context.Context, metricsClient metricsclient.Interface) {
 	metricsAPIUnavailableLogged := false
 	if err := s.loadPodMetrics(ctx, metricsClient); err != nil && ctx.Err() == nil {
+		s.setPodMetricsUnavailable(err)
 		s.logPodMetricsError(err, &metricsAPIUnavailableLogged)
 	}
 
@@ -323,6 +331,7 @@ func (s *ResourceStore) pollPodMetrics(ctx context.Context, metricsClient metric
 			return
 		case <-ticker.C:
 			if err := s.loadPodMetrics(ctx, metricsClient); err != nil && ctx.Err() == nil {
+				s.setPodMetricsUnavailable(err)
 				s.logPodMetricsError(err, &metricsAPIUnavailableLogged)
 			}
 		}
@@ -348,7 +357,10 @@ func (s *ResourceStore) loadPodMetrics(ctx context.Context, metricsClient metric
 			podUsage[podKey(metrics.Namespace, metrics.Name)] = usage
 		}
 	}
+	now := time.Now()
 	s.setPodUsage(podUsage)
+	s.appendPodUsageHistory(podUsage, now)
+	s.setPodMetricsAvailable("metrics.k8s.io", "Live since Kubernetto started", now)
 	return nil
 }
 
@@ -404,6 +416,94 @@ func (s *ResourceStore) setPodUsage(podUsage map[string]corev1.ResourceList) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.podUsage = podUsage
+}
+
+func (s *ResourceStore) setPodMetricsAvailable(source, window string, updatedAt time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if source == "" {
+		source = "metrics"
+	}
+	if window == "" {
+		window = "Last 60 minutes"
+	}
+	if updatedAt.IsZero() {
+		updatedAt = time.Now()
+	}
+	s.metricsState = MetricsState{
+		Available: true,
+		Message:   source + " is reporting pod usage.",
+		Source:    source,
+		Window:    window,
+		UpdatedAt: updatedAt,
+	}
+}
+
+func (s *ResourceStore) setPodMetricsUnavailable(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.metricsState = MetricsState{
+		Available: false,
+		Message:   podMetricsMessage(err),
+		Window:    "Last 60 minutes",
+		UpdatedAt: time.Now(),
+	}
+}
+
+func podMetricsMessage(err error) string {
+	if podMetricsAPIUnavailable(err) {
+		return "metrics.k8s.io is not available."
+	}
+	if err == nil {
+		return "Pod usage metrics are unavailable."
+	}
+	return "Pod usage metrics are unavailable: " + err.Error()
+}
+
+func (s *ResourceStore) podMetricsState() MetricsState {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.metricsState
+}
+
+func (s *ResourceStore) appendPodUsageHistory(podUsage map[string]corev1.ResourceList, now time.Time) {
+	if len(podUsage) == 0 {
+		return
+	}
+	cutoff := now.Add(-60 * time.Minute)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for key, usage := range podUsage {
+		sample := UsageSample{
+			Timestamp: now,
+		}
+		if cpu := usage[corev1.ResourceCPU]; !cpu.IsZero() {
+			sample.CPU = cpu.MilliValue()
+		}
+		if memory := usage[corev1.ResourceMemory]; !memory.IsZero() {
+			sample.Memory = memory.Value()
+		}
+		if sample.CPU == 0 && sample.Memory == 0 {
+			continue
+		}
+		s.podUsageHistory[key] = append(trimUsageSamples(s.podUsageHistory[key], cutoff), sample)
+	}
+	for key, samples := range s.podUsageHistory {
+		samples = trimUsageSamples(samples, cutoff)
+		if len(samples) == 0 {
+			delete(s.podUsageHistory, key)
+			continue
+		}
+		s.podUsageHistory[key] = samples
+	}
+}
+
+func trimUsageSamples(samples []UsageSample, cutoff time.Time) []UsageSample {
+	start := 0
+	for start < len(samples) && samples[start].Timestamp.Before(cutoff) {
+		start++
+	}
+	return samples[start:]
 }
 
 func (s *ResourceStore) serverVersionValue() string {

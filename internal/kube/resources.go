@@ -64,7 +64,17 @@ type ClusterOverview struct {
 	Identity      []DetailField
 	Resources     []OverviewMetric
 	Stats         []OverviewMetric
+	Metrics       MetricsState
+	PodUsage      []PodUsageGraph
 	WarningEvents []OverviewEvent
+}
+
+type MetricsState struct {
+	Available bool
+	Message   string
+	Source    string
+	Window    string
+	UpdatedAt time.Time
 }
 
 type OverviewMetric struct {
@@ -115,22 +125,43 @@ type Cell struct {
 }
 
 type ResourceDetail struct {
-	Kind        ResourceKind
-	Label       string
-	Name        string
-	Namespace   string
-	Status      string
-	StatusKey   string
-	Age         string
-	CreatedAt   time.Time
-	UID         string
-	Error       string
-	YAML        string
-	Events      []ResourceEvent
-	Fields      []DetailField
-	Sections    []DetailSection
-	Labels      []DetailField
-	Annotations []DetailField
+	Kind          ResourceKind
+	Label         string
+	Name          string
+	Namespace     string
+	Status        string
+	StatusKey     string
+	Age           string
+	CreatedAt     time.Time
+	UID           string
+	Error         string
+	YAML          string
+	Events        []ResourceEvent
+	Usage         []UsageGraph
+	UsageTimeline []UsageSample
+	Fields        []DetailField
+	Sections      []DetailSection
+	Labels        []DetailField
+	Annotations   []DetailField
+}
+
+type PodUsageGraph struct {
+	Name      string
+	Namespace string
+	CPU       string
+	Memory    string
+	Samples   []UsageSample
+}
+
+type UsageGraph struct {
+	Label string
+	Value string
+}
+
+type UsageSample struct {
+	Timestamp time.Time
+	CPU       int64
+	Memory    int64
 }
 
 type ResourceEvent struct {

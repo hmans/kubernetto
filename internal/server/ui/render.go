@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -222,6 +223,81 @@ func sortIndicator(column, sortColumn, sortOrder string) string {
 		return "↓"
 	}
 	return ""
+}
+
+func metricsBadgeLabel(state kube.MetricsState) string {
+	if state.Available {
+		return "metrics on"
+	}
+	return "metrics off"
+}
+
+func metricsBadgeClass(state kube.MetricsState) string {
+	if state.Available {
+		return "status-pill good"
+	}
+	return "status-pill neutral"
+}
+
+func metricsSourceLabel(state kube.MetricsState) string {
+	parts := []string{}
+	if state.Source != "" {
+		parts = append(parts, state.Source)
+	}
+	if state.Window != "" {
+		parts = append(parts, state.Window)
+	}
+	return strings.Join(parts, " · ")
+}
+
+func cpuSparklinePoints(samples []kube.UsageSample) string {
+	return sparklinePoints(samples, func(sample kube.UsageSample) int64 {
+		return sample.CPU
+	})
+}
+
+func memorySparklinePoints(samples []kube.UsageSample) string {
+	return sparklinePoints(samples, func(sample kube.UsageSample) int64 {
+		return sample.Memory
+	})
+}
+
+func sparklinePoints(samples []kube.UsageSample, value func(kube.UsageSample) int64) string {
+	if len(samples) == 0 {
+		return ""
+	}
+	maxValue := int64(0)
+	for _, sample := range samples {
+		if current := value(sample); current > maxValue {
+			maxValue = current
+		}
+	}
+	if maxValue == 0 {
+		return ""
+	}
+	const width = 120.0
+	const height = 36.0
+	const pad = 3.0
+	if len(samples) == 1 {
+		y := sparklineY(value(samples[0]), maxValue, height, pad)
+		return fmt.Sprintf("0 %.1f %.1f %.1f", y, width, y)
+	}
+	points := make([]string, 0, len(samples))
+	for i, sample := range samples {
+		x := float64(i) * width / float64(len(samples)-1)
+		y := sparklineY(value(sample), maxValue, height, pad)
+		points = append(points, fmt.Sprintf("%.1f %.1f", x, y))
+	}
+	return strings.Join(points, " ")
+}
+
+func sparklineY(value, maxValue int64, height, pad float64) float64 {
+	if value <= 0 || maxValue <= 0 {
+		return height - pad
+	}
+	ratio := float64(value) / float64(maxValue)
+	ratio = math.Max(0, math.Min(1, ratio))
+	return pad + (1-ratio)*(height-pad*2)
 }
 
 func progressAttrs() templ.Attributes {
