@@ -1,3 +1,5 @@
+import "./app.css";
+
 const themeKey = "kubernetto-theme";
 const themeOptions = new Set(["auto", "light", "dark"]);
 const urlStateKeys = [

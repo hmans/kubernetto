@@ -13,10 +13,10 @@ description = "Build Kubernetto"
 sources = [
 	"**/*.go",
 	"**/*.templ",
-	"internal/server/ui/assets/**/*",
+	"frontend/**/*",
 	"package.json",
 	"pnpm-lock.yaml",
-	"scripts/**/*",
+	"vite.config.mjs",
 	"go.mod",
 	"go.sum",
 	"mise.toml",
