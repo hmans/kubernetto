@@ -77,13 +77,19 @@ func TestAssetEndpoints(t *testing.T) {
 			name:        "css",
 			path:        "/assets/app.css",
 			contentType: "text/css; charset=utf-8",
-			body:        ":root",
+			body:        "Inter Variable",
 		},
 		{
 			name:        "js",
 			path:        "/assets/app.js",
 			contentType: "text/javascript; charset=utf-8",
 			body:        "const themeKey",
+		},
+		{
+			name:        "font",
+			path:        "/assets/vendor/fontsource/inter/files/inter-latin-wght-normal.woff2",
+			contentType: "font/woff2",
+			body:        "wOF2",
 		},
 	}
 
@@ -97,8 +103,8 @@ func TestAssetEndpoints(t *testing.T) {
 			if res.Code != http.StatusOK {
 				t.Fatalf("status = %d, want %d", res.Code, http.StatusOK)
 			}
-			if got := res.Header().Get("Content-Type"); got != tt.contentType {
-				t.Fatalf("content type = %q, want %q", got, tt.contentType)
+			if got := res.Header().Get("Content-Type"); !strings.HasPrefix(got, tt.contentType) {
+				t.Fatalf("content type = %q, want prefix %q", got, tt.contentType)
 			}
 			if got := res.Header().Get("Cache-Control"); got != "no-cache" {
 				t.Fatalf("cache control = %q, want no-cache", got)

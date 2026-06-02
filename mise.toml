@@ -1,5 +1,7 @@
 [tools]
 go = "latest"
+node = "latest"
+pnpm = "latest"
 
 [tasks.dev]
 description = "Run Kubernetto and restart when source files change"
@@ -8,6 +10,7 @@ run = "mise watch app --restart --stop-signal TERM --map-signal HUP:TERM --ignor
 [tasks.build]
 description = "Build Kubernetto"
 run = """
+pnpm build:assets
 go generate ./...
 go build -o ./kubernetto ./cmd/kubernetto
 """
