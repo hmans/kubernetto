@@ -90,6 +90,7 @@ func NewResourceStore(cluster *Cluster, logger *slog.Logger) *ResourceStore {
 
 	store.synced = []cache.InformerSynced{
 		pods.Informer().HasSynced,
+		events.Informer().HasSynced,
 		services.Informer().HasSynced,
 		nodes.Informer().HasSynced,
 		namespaces.Informer().HasSynced,
@@ -455,6 +456,11 @@ func (s *ResourceStore) listPods(namespace string) []*corev1.Pod {
 		return items
 	}
 	items, _ := s.pods.List(labels.Everything())
+	return items
+}
+
+func (s *ResourceStore) listEvents() []*corev1.Event {
+	items, _ := s.events.List(labels.Everything())
 	return items
 }
 

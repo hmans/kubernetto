@@ -23,6 +23,7 @@ type PageState struct {
 	Resources    []kube.ResourceDef
 	Signals      Signals
 	Summary      kube.Summary
+	Overview     kube.ClusterOverview
 	Table        kube.Table
 	Detail       kube.ResourceDetail
 	Namespaces   []string
@@ -103,6 +104,10 @@ func hasDetail(state PageState) bool {
 	return state.Detail.Name != ""
 }
 
+func isOverview(state PageState) bool {
+	return state.Signals.Resource == string(kube.KindOverview)
+}
+
 func contentGridClass(state PageState) string {
 	if hasDetail(state) {
 		return "content-grid has-detail"
@@ -128,6 +133,18 @@ func appSignalAttrs(state PageState) templ.Attributes {
 
 func resourceButtonAttrs(def kube.ResourceDef) templ.Attributes {
 	return templ.Attributes{
+		"data-indicator:loading": true,
+		"data-resource-kind":     string(def.Kind),
+		"data-resource-scope":    def.Scope,
+		"data-on:click":          "$resource = " + signalLiteral(string(def.Kind)) + "; $sortColumn = ''; $sortOrder = ''; $selectedName = ''; $selectedNamespace = ''; $detailMode = 'overview'; @get('/ui/table')",
+	}
+}
+
+func overviewResourceLinkAttrs(kind kube.ResourceKind) templ.Attributes {
+	def := resourceDef(kind)
+	return templ.Attributes{
+		"type":                   "button",
+		"class":                  "overview-link",
 		"data-indicator:loading": true,
 		"data-resource-kind":     string(def.Kind),
 		"data-resource-scope":    def.Scope,
