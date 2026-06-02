@@ -39,6 +39,7 @@
   --status-neutral-bg: #e9f1f5;
   --danger-bg: #fff1f0;
   --danger-line: #f3b8b2;
+  --metric-label-shadow: 0 1px 1px rgba(255,255,255,.5);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -74,6 +75,7 @@
     --status-neutral-bg: rgba(45,212,191,.14);
     --danger-bg: rgba(249,112,102,.14);
     --danger-line: rgba(249,112,102,.34);
+    --metric-label-shadow: 0 1px 2px rgba(0,0,0,.72), 0 0 8px rgba(0,0,0,.42);
   }
 }
 
@@ -109,6 +111,7 @@
   --status-neutral-bg: rgba(45,212,191,.14);
   --danger-bg: rgba(249,112,102,.14);
   --danger-line: rgba(249,112,102,.34);
+  --metric-label-shadow: 0 1px 2px rgba(0,0,0,.72), 0 0 8px rgba(0,0,0,.42);
 }
 
 body {
@@ -290,6 +293,7 @@ select {
   font-size: 14px;
   font-weight: 760;
   line-height: 1;
+  text-shadow: var(--metric-label-shadow);
 }
 .overview-stat-card.good .metric-pie {
   --metric-color: var(--good);
