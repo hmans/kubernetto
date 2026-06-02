@@ -1,9 +1,11 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/starfederation/datastar-go/datastar"
@@ -12,12 +14,22 @@ import (
 )
 
 type Server struct {
-	cluster *kube.Cluster
-	store   *kube.ResourceStore
-	logger  *slog.Logger
+	clusters       []*clusterSession
+	clustersByName map[string]*clusterSession
+	defaultContext string
+	ctx            context.Context
+	logger         *slog.Logger
+	mu             sync.Mutex
+}
+
+type clusterSession struct {
+	cluster           *kube.Cluster
+	store             *kube.ResourceStore
+	initialSyncWaited bool
 }
 
 type Signals struct {
+	Context    string `json:"context"`
 	Resource   string `json:"resource"`
 	Namespace  string `json:"namespace"`
 	Query      string `json:"query"`
@@ -25,11 +37,33 @@ type Signals struct {
 	SortOrder  string `json:"sortOrder"`
 }
 
-func New(cluster *kube.Cluster, store *kube.ResourceStore, logger *slog.Logger) *Server {
+func New(clusters []*kube.Cluster, ctx context.Context, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{cluster: cluster, store: store, logger: logger}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	app := &Server{
+		clusters:       make([]*clusterSession, 0, len(clusters)),
+		clustersByName: make(map[string]*clusterSession, len(clusters)),
+		ctx:            ctx,
+		logger:         logger,
+	}
+	for _, cluster := range clusters {
+		if cluster == nil || cluster.ContextName == "" {
+			continue
+		}
+		session := &clusterSession{cluster: cluster}
+		app.clusters = append(app.clusters, session)
+		app.clustersByName[cluster.ContextName] = session
+		if app.defaultContext == "" || cluster.Current {
+			app.defaultContext = cluster.ContextName
+		}
+	}
+	app.ensureStore(app.defaultContext)
+	return app
 }
 
 func (s *Server) Routes() http.Handler {
@@ -37,8 +71,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /", s.handleIndex)
 	mux.HandleFunc("GET /assets/app.css", s.handleStyles)
 	mux.HandleFunc("GET /ui/refresh", s.handleRefresh)
+	mux.HandleFunc("GET /ui/summary", s.handleSummary)
 	mux.HandleFunc("GET /ui/table", s.handleTable)
-	mux.HandleFunc("GET /events", s.handleEvents)
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	return withSecurityHeaders(mux)
 }
@@ -61,6 +95,13 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	sse.PatchElements(renderFragment(tableView(state)))
 }
 
+func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
+	signals := readSignals(r)
+	state := s.state(signals)
+	sse := datastar.NewSSE(w, r)
+	sse.PatchElements(renderFragment(summaryView(state)))
+}
+
 func (s *Server) handleTable(w http.ResponseWriter, r *http.Request) {
 	signals := readSignals(r)
 	state := s.state(signals)
@@ -70,22 +111,6 @@ func (s *Server) handleTable(w http.ResponseWriter, r *http.Request) {
 	sse.PatchElements(renderFragment(tableView(state)))
 }
 
-func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
-	sse := datastar.NewSSE(w, r)
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-r.Context().Done():
-			return
-		case <-ticker.C:
-			state := s.state(readSignals(r))
-			sse.PatchElements(renderFragment(summaryView(state)))
-		}
-	}
-}
-
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -93,6 +118,11 @@ func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) state(signals Signals) PageState {
 	kind := kube.NormalizeKind(signals.Resource)
 	namespace := signals.Namespace
+	session := s.session(signals.Context)
+	contextName := ""
+	if session != nil && session.cluster != nil {
+		contextName = session.cluster.ContextName
+	}
 
 	def := resourceDef(kind)
 	if def.Scope == "cluster" {
@@ -104,20 +134,21 @@ func (s *Server) state(signals Signals) PageState {
 	namespaces := []string{}
 	namespaceErr := ""
 
-	if s.store != nil {
-		summary = s.store.Summary()
-		table = s.store.TableWithSort(kind, namespace, signals.Query, signals.SortColumn, signals.SortOrder)
+	if session != nil && session.store != nil {
+		summary = session.store.Summary()
+		table = session.store.TableWithSort(kind, namespace, signals.Query, signals.SortColumn, signals.SortOrder)
 		var err error
-		namespaces, err = s.store.Namespaces()
+		namespaces, err = session.store.Namespaces()
 		if err != nil {
 			namespaceErr = err.Error()
 		}
 	}
 
 	return PageState{
-		Cluster:      s.cluster,
+		Cluster:      sessionCluster(session),
+		Clusters:     s.clusterList(),
 		Resources:    kube.ResourceDefs,
-		Signals:      Signals{Resource: string(kind), Namespace: namespace, Query: signals.Query, SortColumn: table.SortColumn, SortOrder: table.SortOrder},
+		Signals:      Signals{Context: contextName, Resource: string(kind), Namespace: namespace, Query: signals.Query, SortColumn: table.SortColumn, SortOrder: table.SortOrder},
 		Summary:      summary,
 		Table:        table,
 		Namespaces:   namespaces,
@@ -132,6 +163,9 @@ func readSignals(r *http.Request) Signals {
 		// endpoints easy to hit directly while the UI sends reactive signals.
 	}
 	q := r.URL.Query()
+	if contextName := q.Get("context"); contextName != "" {
+		signals.Context = contextName
+	}
 	if resource := q.Get("resource"); resource != "" {
 		signals.Resource = resource
 	}
@@ -151,6 +185,71 @@ func readSignals(r *http.Request) Signals {
 		signals.Resource = string(kube.KindPods)
 	}
 	return signals
+}
+
+func (s *Server) session(contextName string) *clusterSession {
+	if contextName == "" {
+		contextName = s.defaultContext
+	}
+	session := s.ensureStore(contextName)
+	s.waitForInitialSync(session)
+	return session
+}
+
+func (s *Server) ensureStore(contextName string) *clusterSession {
+	if contextName == "" {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session := s.clustersByName[contextName]
+	if session == nil {
+		session = s.clustersByName[s.defaultContext]
+	}
+	if session == nil {
+		return nil
+	}
+	if session.store == nil {
+		session.store = kube.NewResourceStore(session.cluster, s.logger)
+		session.store.Start(s.ctx)
+	}
+	return session
+}
+
+func (s *Server) waitForInitialSync(session *clusterSession) {
+	if session == nil || session.store == nil {
+		return
+	}
+
+	s.mu.Lock()
+	if session.initialSyncWaited {
+		s.mu.Unlock()
+		return
+	}
+	session.initialSyncWaited = true
+	store := session.store
+	s.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
+	defer cancel()
+	store.WaitForSync(ctx)
+}
+
+func (s *Server) clusterList() []*kube.Cluster {
+	clusters := make([]*kube.Cluster, 0, len(s.clusters))
+	for _, session := range s.clusters {
+		clusters = append(clusters, session.cluster)
+	}
+	return clusters
+}
+
+func sessionCluster(session *clusterSession) *kube.Cluster {
+	if session == nil {
+		return nil
+	}
+	return session.cluster
 }
 
 func resourceDef(kind kube.ResourceKind) kube.ResourceDef {

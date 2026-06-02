@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 
 type PageState struct {
 	Cluster      *kube.Cluster
+	Clusters     []*kube.Cluster
 	Resources    []kube.ResourceDef
 	Signals      Signals
 	Summary      kube.Summary
@@ -83,13 +85,14 @@ func hasClass(classes, class string) bool {
 
 func appSignalAttrs(state PageState) templ.Attributes {
 	return templ.Attributes{
-		"data-signals:resource":   jsString(state.Signals.Resource),
-		"data-signals:namespace":  jsString(state.Signals.Namespace),
-		"data-signals:query":      jsString(state.Signals.Query),
-		"data-signals:sortColumn": jsString(state.Signals.SortColumn),
-		"data-signals:sortOrder":  jsString(state.Signals.SortOrder),
-		"data-signals:loading":    "false",
-		"data-init":               "@get('/events')",
+		"data-signals:context":          signalLiteral(state.Signals.Context),
+		"data-signals:resource":         signalLiteral(state.Signals.Resource),
+		"data-signals:namespace":        signalLiteral(state.Signals.Namespace),
+		"data-signals:query":            signalLiteral(state.Signals.Query),
+		"data-signals:sortColumn":       signalLiteral(state.Signals.SortColumn),
+		"data-signals:sortOrder":        signalLiteral(state.Signals.SortOrder),
+		"data-signals:loading":          "false",
+		"data-on-interval__duration.5s": "@get('/ui/summary')",
 	}
 }
 
@@ -105,6 +108,14 @@ func namespaceSelectAttrs() templ.Attributes {
 		"data-indicator:loading": true,
 		"data-bind:namespace":    true,
 		"data-on:change":         "@get('/ui/table')",
+	}
+}
+
+func contextSelectAttrs() templ.Attributes {
+	return templ.Attributes{
+		"data-indicator:loading": true,
+		"data-bind:context":      true,
+		"data-on:change":         "$namespace = ''; @get('/ui/refresh')",
 	}
 }
 
@@ -124,7 +135,7 @@ func refreshButtonAttrs() templ.Attributes {
 }
 
 func sortHeaderAttrs(column string) templ.Attributes {
-	columnLiteral := jsString(column)
+	columnLiteral := signalLiteral(column)
 	nextOrder := "$sortColumn == " + columnLiteral + " ? ($sortOrder == 'asc' ? 'desc' : ($sortOrder == 'desc' ? '' : 'asc')) : 'asc'"
 	return templ.Attributes{
 		"data-indicator:loading": true,
@@ -166,12 +177,12 @@ func sortIndicator(column, sortColumn, sortOrder string) string {
 	return ""
 }
 
-func jsString(value string) string {
-	return fmt.Sprintf("%q", value)
-}
-
 func progressAttrs() templ.Attributes {
 	return templ.Attributes{
 		"data-class:active": "$loading",
 	}
+}
+
+func signalLiteral(value string) string {
+	return strconv.Quote(value)
 }

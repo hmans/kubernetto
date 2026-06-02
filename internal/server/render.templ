@@ -21,11 +21,19 @@ templ Page(state PageState) {
 						<div>Kubernetto</div>
 					</div>
 					<div class="context">
-						<span>Context</span>
 						if state.Cluster != nil {
-							<strong>{ state.Cluster.ContextName }</strong>
+							<label for="context">Context</label>
+							<select id="context" { contextSelectAttrs()... }>
+								for _, cluster := range state.Clusters {
+									<option value={ cluster.ContextName } selected?={ state.Signals.Context == cluster.ContextName }>{ cluster.ContextName }</option>
+								}
+							</select>
+							if state.Cluster.ClusterName != "" {
+								<span>{ state.Cluster.ClusterName }</span>
+							}
 							<span>{ state.Cluster.ConfigSource }</span>
 						} else {
+							<span>Context</span>
 							<strong>unconfigured</strong>
 							<span>kubeconfig unavailable</span>
 						}

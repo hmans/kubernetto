@@ -74,17 +74,15 @@ func resolveListenAddr(opts serverOptions, addrSet bool) (string, error) {
 
 func runServer(addr, kubeconfig string) error {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGHUP, syscall.SIGTERM)
 	defer stop()
 
-	cluster, err := kube.NewCluster(kubeconfig)
+	clusters, err := kube.NewClusters(kubeconfig)
 	if err != nil {
 		logger.Warn("starting without a usable Kubernetes client", "error", err)
 	}
-	store := kube.NewResourceStore(cluster, logger)
-	store.Start(ctx)
 
-	app := server.New(cluster, store, logger)
+	app := server.New(clusters, ctx, logger)
 
 	srv := &http.Server{
 		Addr:              addr,
