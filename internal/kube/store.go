@@ -41,6 +41,7 @@ type ResourceStore struct {
 	podUsage      map[string]corev1.ResourceList
 
 	pods         corelisters.PodLister
+	events       corelisters.EventLister
 	services     corelisters.ServiceLister
 	nodes        corelisters.NodeLister
 	namespaces   corelisters.NamespaceLister
@@ -68,6 +69,7 @@ func NewResourceStore(cluster *Cluster, logger *slog.Logger) *ResourceStore {
 	store.podUsage = map[string]corev1.ResourceList{}
 
 	pods := store.factory.Core().V1().Pods()
+	events := store.factory.Core().V1().Events()
 	services := store.factory.Core().V1().Services()
 	nodes := store.factory.Core().V1().Nodes()
 	namespaces := store.factory.Core().V1().Namespaces()
@@ -77,6 +79,7 @@ func NewResourceStore(cluster *Cluster, logger *slog.Logger) *ResourceStore {
 	ingresses := store.factory.Networking().V1().Ingresses()
 
 	store.pods = pods.Lister()
+	store.events = events.Lister()
 	store.services = services.Lister()
 	store.nodes = nodes.Lister()
 	store.namespaces = namespaces.Lister()

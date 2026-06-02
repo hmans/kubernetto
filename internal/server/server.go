@@ -29,12 +29,15 @@ type clusterSession struct {
 }
 
 type Signals struct {
-	Context    string `json:"context"`
-	Resource   string `json:"resource"`
-	Namespace  string `json:"namespace"`
-	Query      string `json:"query"`
-	SortColumn string `json:"sortColumn"`
-	SortOrder  string `json:"sortOrder"`
+	Context           string `json:"context"`
+	Resource          string `json:"resource"`
+	Namespace         string `json:"namespace"`
+	Query             string `json:"query"`
+	SortColumn        string `json:"sortColumn"`
+	SortOrder         string `json:"sortOrder"`
+	SelectedName      string `json:"selectedName"`
+	SelectedNamespace string `json:"selectedNamespace"`
+	DetailMode        string `json:"detailMode"`
 }
 
 func New(clusters []*kube.Cluster, ctx context.Context, logger *slog.Logger) *Server {
@@ -74,6 +77,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /ui/refresh", s.handleRefresh)
 	mux.HandleFunc("GET /ui/summary", s.handleSummary)
 	mux.HandleFunc("GET /ui/table", s.handleTable)
+	mux.HandleFunc("GET /ui/selection", s.handleSelection)
+	mux.HandleFunc("GET /ui/detail", s.handleDetail)
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	return withSecurityHeaders(mux)
 }
@@ -94,6 +99,7 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	sse.PatchElements(renderFragment(summaryView(state)))
 	sse.PatchElements(renderFragment(namespacePicker(state)))
 	sse.PatchElements(renderFragment(tableView(state)))
+	sse.PatchElements(renderFragment(detailView(state)))
 }
 
 func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
@@ -110,6 +116,22 @@ func (s *Server) handleTable(w http.ResponseWriter, r *http.Request) {
 	sse.PatchElements(renderFragment(resourceNav(state)))
 	sse.PatchElements(renderFragment(namespacePicker(state)))
 	sse.PatchElements(renderFragment(tableView(state)))
+	sse.PatchElements(renderFragment(detailView(state)))
+}
+
+func (s *Server) handleSelection(w http.ResponseWriter, r *http.Request) {
+	signals := readSignals(r)
+	state := s.state(signals)
+	sse := datastar.NewSSE(w, r)
+	sse.PatchElements(renderFragment(tableView(state)))
+	sse.PatchElements(renderFragment(detailView(state)))
+}
+
+func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
+	signals := readSignals(r)
+	state := s.state(signals)
+	sse := datastar.NewSSE(w, r)
+	sse.PatchElements(renderFragment(detailView(state)))
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
@@ -119,6 +141,7 @@ func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) state(signals Signals) PageState {
 	kind := kube.NormalizeKind(signals.Resource)
 	namespace := signals.Namespace
+	detailMode := normalizeDetailMode(signals.DetailMode)
 	session := s.session(signals.Context)
 	contextName := ""
 	if session != nil && session.cluster != nil {
@@ -129,15 +152,21 @@ func (s *Server) state(signals Signals) PageState {
 	if def.Scope == "cluster" {
 		namespace = ""
 	}
+	selectedNamespace := signals.SelectedNamespace
+	if def.Scope == "cluster" {
+		selectedNamespace = ""
+	}
 
 	summary := kube.Summary{UpdatedAt: time.Now(), Error: "No Kubernetes client is configured."}
 	table := kube.Table{Kind: kind, Label: def.Label, Namespace: namespace, Query: signals.Query, SortColumn: signals.SortColumn, SortOrder: signals.SortOrder, UpdatedAt: time.Now(), Namespaced: def.Scope == "namespaced"}
+	detail := kube.ResourceDetail{Kind: kind, Label: def.Label, Name: signals.SelectedName, Namespace: selectedNamespace}
 	namespaces := []string{}
 	namespaceErr := ""
 
 	if session != nil && session.store != nil {
 		summary = session.store.Summary()
 		table = session.store.TableWithSort(kind, namespace, signals.Query, signals.SortColumn, signals.SortOrder)
+		detail = session.store.Detail(kind, selectedNamespace, signals.SelectedName)
 		var err error
 		namespaces, err = session.store.Namespaces()
 		if err != nil {
@@ -149,9 +178,10 @@ func (s *Server) state(signals Signals) PageState {
 		Cluster:      sessionCluster(session),
 		Clusters:     s.clusterList(),
 		Resources:    kube.ResourceDefs,
-		Signals:      Signals{Context: contextName, Resource: string(kind), Namespace: namespace, Query: signals.Query, SortColumn: table.SortColumn, SortOrder: table.SortOrder},
+		Signals:      Signals{Context: contextName, Resource: string(kind), Namespace: namespace, Query: signals.Query, SortColumn: table.SortColumn, SortOrder: table.SortOrder, SelectedName: signals.SelectedName, SelectedNamespace: selectedNamespace, DetailMode: detailMode},
 		Summary:      summary,
 		Table:        table,
+		Detail:       detail,
 		Namespaces:   namespaces,
 		NamespaceErr: namespaceErr,
 	}
@@ -182,10 +212,29 @@ func readSignals(r *http.Request) Signals {
 	if sortOrder := q.Get("sortOrder"); sortOrder != "" {
 		signals.SortOrder = sortOrder
 	}
+	if selectedName := q.Get("selectedName"); selectedName != "" {
+		signals.SelectedName = selectedName
+	}
+	if selectedNamespace := q.Get("selectedNamespace"); selectedNamespace != "" {
+		signals.SelectedNamespace = selectedNamespace
+	}
+	if detailMode := q.Get("detailMode"); detailMode != "" {
+		signals.DetailMode = detailMode
+	}
 	if signals.Resource == "" {
 		signals.Resource = string(kube.KindPods)
 	}
+	signals.DetailMode = normalizeDetailMode(signals.DetailMode)
 	return signals
+}
+
+func normalizeDetailMode(mode string) string {
+	switch mode {
+	case "overview", "events", "yaml":
+		return mode
+	default:
+		return "overview"
+	}
 }
 
 func (s *Server) session(contextName string) *clusterSession {

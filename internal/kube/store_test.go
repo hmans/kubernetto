@@ -2,6 +2,7 @@ package kube
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -151,6 +152,18 @@ func TestResourceStoreReadsFromInformerCache(t *testing.T) {
 	if table.Rows[0].Name != "api" || table.Rows[1].Name != "worker" {
 		t.Fatalf("rows not sorted by name: %#v", table.Rows)
 	}
+
+	detail := store.Detail(KindPods, "prod", "api")
+	if detail.Error != "" {
+		t.Fatalf("detail error = %q", detail.Error)
+	}
+	if detail.Name != "api" || detail.Namespace != "prod" || detail.Status != string(corev1.PodRunning) {
+		t.Fatalf("unexpected pod detail: %#v", detail)
+	}
+	if !strings.Contains(detail.YAML, "apiVersion: v1") || !strings.Contains(detail.YAML, "kind: Pod") {
+		t.Fatalf("detail yaml missing Kubernetes identity: %q", detail.YAML)
+	}
+
 	if want := []string{"Name", "Namespace", "Ready", "Status", "Restarts", "CPU", "CPU Req", "CPU Limit", "MEM", "MEM Req", "MEM Limit", "Node", "Age"}; !equalStrings(table.Columns, want) {
 		t.Fatalf("pod columns = %#v, want %#v", table.Columns, want)
 	}
@@ -226,6 +239,10 @@ func TestResourceStoreReadsDoNotCallKubeAPI(t *testing.T) {
 		table := store.Table(KindPods, "", "")
 		if table.Error != "" {
 			t.Fatalf("table error = %q", table.Error)
+		}
+		detail := store.Detail(KindPods, "default", "api")
+		if detail.Error != "" {
+			t.Fatalf("detail error = %q", detail.Error)
 		}
 	}
 
