@@ -119,16 +119,10 @@ func TestAssetEndpoints(t *testing.T) {
 		body        string
 	}{
 		{
-			name:        "css",
-			path:        "/assets/app.css",
-			contentType: "text/css; charset=utf-8",
-			body:        "Inter Variable",
-		},
-		{
-			name:        "js",
-			path:        "/assets/app.js",
-			contentType: "text/javascript; charset=utf-8",
-			body:        "const themeKey",
+			name:        "tracked asset",
+			path:        "/assets/README.txt",
+			contentType: "text/plain",
+			body:        "Generated frontend bundles",
 		},
 	}
 

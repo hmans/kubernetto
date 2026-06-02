@@ -10,25 +10,6 @@ run = "mise watch --restart --stop-signal TERM --map-signal HUP:TERM app"
 
 [tasks.build]
 description = "Build Kubernetto"
-sources = [
-	"**/*.go",
-	"**/*.templ",
-	"internal/server/ui/assets/app.css",
-	"internal/server/ui/assets/app.js",
-	"package.json",
-	"pnpm-lock.yaml",
-	"scripts/**/*",
-	"go.mod",
-	"go.sum",
-	"mise.toml",
-	"!**/*_templ.go",
-]
-outputs = [
-	"kubernetto",
-	"internal/server/ui/*_templ.go",
-	"internal/server/ui/assets/vendor/fontsource/inter/index.css",
-	"internal/server/ui/assets/vendor/fontsource/inter/files/*.woff2",
-]
 run = """
 pnpm build:assets
 go generate ./...
@@ -39,3 +20,15 @@ go build -o ./kubernetto ./cmd/kubernetto
 hide = true
 depends = "build"
 run = "exec ./kubernetto"
+sources = [
+	"**/*.go",
+	"**/*.templ",
+	"frontend/**/*",
+	"package.json",
+	"pnpm-lock.yaml",
+	"vite.config.mjs",
+	"go.mod",
+	"go.sum",
+	"mise.toml",
+	"!**/*_templ.go",
+]

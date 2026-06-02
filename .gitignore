@@ -1,6 +1,6 @@
 /kubernetto
 /dist/
 /node_modules/
-/internal/server/ui/assets/vendor/
+/internal/server/ui/assets/dist/
 /.DS_Store
 /.vscode/settings.json
