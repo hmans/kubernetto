@@ -77,8 +77,21 @@ button, input, select { font: inherit; }
   width: 32px; height: 32px; border-radius: 7px; display: grid; place-items: center;
   background: #0d9488; color: white; font-weight: 800;
 }
-.context { color: #a8bac2; font-size: 12px; display: grid; gap: 5px; }
+.context { color: #a8bac2; font-size: 12px; display: grid; gap: 6px; }
+.context label { color: #a8bac2; font-size: 12px; }
 .context strong { color: #ffffff; font-size: 13px; overflow-wrap: anywhere; }
+.context select {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 7px;
+  background: #20343d;
+  color: #fff;
+  padding: 0 8px;
+  outline: none;
+}
+.context select:focus { border-color: #2dd4bf; box-shadow: 0 0 0 3px rgba(45,212,191,.16); }
 .nav { display: grid; gap: 5px; }
 .nav button {
   width: 100%;
