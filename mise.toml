@@ -15,5 +15,5 @@ exec ./kubernetto "$@"
 sources = [
   "**/*.go",
   "**/*.templ",
-  "internal/server/assets/**",
+  "internal/server/ui/assets/**",
 ]
