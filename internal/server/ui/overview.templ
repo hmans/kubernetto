@@ -43,7 +43,12 @@ templ OverviewView(state PageState) {
 							<div class="updated">{ metricsSourceLabel(state.Overview.Metrics) }</div>
 						}
 					</div>
-					<span class={ metricsBadgeClass(state.Overview.Metrics) }>{ metricsBadgeLabel(state.Overview.Metrics) }</span>
+					<div class="usage-panel-actions">
+						if state.Overview.Metrics.Available && len(state.Overview.PodUsage) > 0 {
+							@UsageLegend()
+						}
+						<span class={ metricsBadgeClass(state.Overview.Metrics) }>{ metricsBadgeLabel(state.Overview.Metrics) }</span>
+					</div>
 				</div>
 				if !state.Overview.Metrics.Available {
 					<div class="empty">{ state.Overview.Metrics.Message }</div>

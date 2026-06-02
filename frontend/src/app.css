@@ -362,11 +362,50 @@ select {
   border-bottom: 1px solid var(--line);
 }
 
+.usage-panel-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .overview-panel h3 {
   margin: 0;
   color: var(--text-strong);
   font-size: 16px;
   line-height: 1.2;
+}
+
+.usage-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 680;
+  line-height: 1;
+}
+
+.usage-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.usage-legend-item span {
+  width: 9px;
+  height: 2px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.usage-legend-item.cpu {
+  color: var(--accent);
+}
+
+.usage-legend-item.memory {
+  color: var(--accent-2);
 }
 
 .pod-usage-list {
@@ -637,6 +676,14 @@ td.status.neutral > span,
   gap: 7px;
 }
 
+.detail-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
 .detail-usage-list {
   display: grid;
   gap: 9px;
@@ -656,7 +703,7 @@ td.status.neutral > span,
 }
 
 .detail-section h3 {
-  margin: 0 0 10px;
+  margin: 0;
   font-size: 13px;
   line-height: 1.2;
 }
