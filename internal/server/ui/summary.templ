@@ -1,0 +1,52 @@
+package ui
+
+import "fmt"
+
+templ SummaryView(state PageState) {
+	<section id="summary" class="summary" aria-label="Cluster summary">
+		if state.Summary.Error != "" {
+			<div class="notice danger summary-notice">{ state.Summary.Error }</div>
+		}
+		<div class="metric">
+			<div class="label">Version</div>
+			<div class="value">
+				if state.Summary.ServerVersion != "" {
+					{ state.Summary.ServerVersion }
+				} else {
+					unknown
+				}
+			</div>
+		</div>
+		<div class="metric">
+			<div class="label">Nodes</div>
+			<div class="value">{ fmt.Sprint(state.Summary.Nodes) }</div>
+		</div>
+		<div class="metric">
+			<div class="label">Pods</div>
+			<div class="value">{ fmt.Sprint(state.Summary.Pods) }</div>
+		</div>
+		<div class="metric">
+			<div class="label">Deployments</div>
+			<div class="value">{ fmt.Sprint(state.Summary.Deployments) }</div>
+		</div>
+	</section>
+}
+
+templ NamespacePickerView(state PageState) {
+	<div id="namespace-picker" class="field">
+		<label for="namespace">Namespace</label>
+		<select
+			id="namespace"
+			disabled?={ !state.Table.Namespaced }
+			{ namespaceSelectAttrs()... }
+		>
+			<option value="">All namespaces</option>
+			for _, namespace := range state.Namespaces {
+				<option value={ namespace } selected?={ state.Signals.Namespace == namespace }>{ namespace }</option>
+			}
+		</select>
+		if state.NamespaceErr != "" {
+			<span class="updated">{ state.NamespaceErr }</span>
+		}
+	</div>
+}

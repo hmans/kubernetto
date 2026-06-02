@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -77,5 +78,50 @@ func TestHandleIndexUsesQueryState(t *testing.T) {
 	}
 	if !strings.Contains(body, `value="api"`) {
 		t.Fatalf("index did not render requested query value")
+	}
+}
+
+func TestAssetEndpoints(t *testing.T) {
+	app := New(nil, context.Background(), nil)
+	tests := []struct {
+		name        string
+		path        string
+		contentType string
+		body        string
+	}{
+		{
+			name:        "css",
+			path:        "/assets/app.css",
+			contentType: "text/css; charset=utf-8",
+			body:        ":root",
+		},
+		{
+			name:        "js",
+			path:        "/assets/app.js",
+			contentType: "text/javascript; charset=utf-8",
+			body:        "const themeKey",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			res := httptest.NewRecorder()
+
+			app.Routes().ServeHTTP(res, req)
+
+			if res.Code != http.StatusOK {
+				t.Fatalf("status = %d, want %d", res.Code, http.StatusOK)
+			}
+			if got := res.Header().Get("Content-Type"); got != tt.contentType {
+				t.Fatalf("content type = %q, want %q", got, tt.contentType)
+			}
+			if got := res.Header().Get("Cache-Control"); got != "no-cache" {
+				t.Fatalf("cache control = %q, want no-cache", got)
+			}
+			if body := res.Body.String(); !strings.Contains(body, tt.body) {
+				t.Fatalf("body did not contain %q", tt.body)
+			}
+		})
 	}
 }
