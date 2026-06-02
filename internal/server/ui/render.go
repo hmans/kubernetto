@@ -87,6 +87,17 @@ func hasClass(classes, class string) bool {
 	return false
 }
 
+func hasDetail(state PageState) bool {
+	return state.Detail.Name != ""
+}
+
+func contentGridClass(state PageState) string {
+	if hasDetail(state) {
+		return "content-grid has-detail"
+	}
+	return "content-grid"
+}
+
 func appSignalAttrs(state PageState) templ.Attributes {
 	return templ.Attributes{
 		"data-signals:context":           signalLiteral(state.Signals.Context),

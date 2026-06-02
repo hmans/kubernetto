@@ -60,14 +60,20 @@ templ Page(state PageState) {
 						</div>
 						<button class="icon-button" type="button" title="Refresh" { refreshButtonAttrs()... }>↻</button>
 					</section>
-					<div class="content-grid">
-						@TableView(state)
-						@DetailView(state)
-					</div>
+					@ContentView(state)
 				</main>
 			</div>
 		</body>
 	</html>
+}
+
+templ ContentView(state PageState) {
+	<div id="content-grid" class={ contentGridClass(state) }>
+		@TableView(state)
+		if hasDetail(state) {
+			@DetailView(state)
+		}
+	</div>
 }
 
 templ ResourceNavView(state PageState) {
@@ -79,7 +85,6 @@ templ ResourceNavView(state PageState) {
 				{ resourceButtonAttrs(resource)... }
 			>
 				<span>{ resource.Label }</span>
-				<span class="scope">{ resource.Scope }</span>
 			</button>
 		}
 	</nav>

@@ -5,13 +5,17 @@ go = "latest"
 description = "Run Kubernetto and restart when source files change"
 run = "mise watch app --restart --stop-signal TERM --map-signal HUP:TERM --ignore 'internal/server/*_templ.go'"
 
-[tasks.app]
-hide = true
+[tasks.build]
+description = "Build Kubernetto"
 run = """
 go generate ./...
 go build -o ./kubernetto ./cmd/kubernetto
-exec ./kubernetto "$@"
 """
+
+[tasks.app]
+hide = true
+depends = "build"
+run = "exec ./kubernetto"
 sources = [
   "**/*.go",
   "**/*.templ",
