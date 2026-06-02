@@ -19,11 +19,18 @@ templ OverviewView(state PageState) {
 		} else {
 			<div class="overview-stats">
 				for _, metric := range state.Overview.Stats {
-					<button { overviewResourceLinkAttrs(metric.Kind)... }>
-						<div class="label">{ metric.Label }</div>
-						<div class="overview-value">{ metric.Value }</div>
-						if metric.Detail != "" {
-							<div class="updated">{ metric.Detail }</div>
+					<button { overviewStatLinkAttrs(metric)... }>
+						<div class="metric-copy">
+							<div class="label">{ metric.Label }</div>
+							<div class="overview-value">{ metric.Value }</div>
+							if metric.Detail != "" {
+								<div class="updated">{ metric.Detail }</div>
+							}
+						</div>
+						if metric.Ratio != nil {
+							<div class="metric-pie" style={ metricPieStyle(metric.Ratio.Percent) } role="img" aria-label={ metricPieAria(metric) }>
+								<span>{ metricPieLabel(metric.Ratio.Percent) }</span>
+							</div>
 						}
 					</button>
 				}
