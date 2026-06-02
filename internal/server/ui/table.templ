@@ -3,9 +3,9 @@ package ui
 import "fmt"
 
 templ TableView(state PageState) {
-	<section id="table-panel" class="table-panel" aria-live="polite">
-		<div class="table-head">
-			<h2>{ state.Table.Label }</h2>
+	<section id="table-panel" class="min-w-0 overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--panel)] shadow-[var(--shadow)]" aria-live="polite">
+		<div class="flex items-center justify-between gap-3 border-b border-[var(--line)] px-4 py-3.5">
+			<h2 class="m-0 text-base leading-[1.2] text-[var(--text-strong)]">{ state.Table.Label }</h2>
 			<div class="updated">{ fmt.Sprintf("%d rows · updated %s", len(state.Table.Rows), formatClock(state.Table.UpdatedAt)) }</div>
 		</div>
 		if state.Table.Error != "" {
@@ -13,7 +13,7 @@ templ TableView(state PageState) {
 		} else if len(state.Table.Rows) == 0 {
 			<div class="empty">No { lower(state.Table.Label) } found.</div>
 		} else {
-			<div class="table-wrap">
+			<div class="overflow-auto">
 				<table>
 					<thead>
 						<tr>
@@ -25,7 +25,7 @@ templ TableView(state PageState) {
 										{ sortHeaderAttrs(column)... }
 									>
 										<span>{ column }</span>
-										<span class="sort-indicator" aria-hidden="true">{ sortIndicator(column, state.Table.SortColumn, state.Table.SortOrder) }</span>
+										<span class={ sortIndicatorClass(column, state.Table.SortColumn, state.Table.SortOrder) } aria-hidden="true"></span>
 									</button>
 								</th>
 							}

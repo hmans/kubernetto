@@ -8,24 +8,26 @@ import (
 
 templ DetailView(state PageState) {
 	if hasDetail(state) {
-		<aside id="detail-panel" class="detail-panel" aria-live="polite">
-			<div class="detail-head">
-				<div class="detail-title">
-					<span>{ state.Detail.Label }</span>
-					<h2>{ state.Detail.Name }</h2>
+		<aside id="detail-panel" class="sticky top-4 max-h-[calc(100vh-220px)] min-w-0 overflow-auto rounded-lg border border-[var(--line)] bg-[var(--panel)] shadow-[var(--shadow)] max-[860px]:static max-[860px]:max-h-none" aria-live="polite">
+			<div class="flex items-start justify-between gap-3 border-b border-[var(--line)] px-3.5 pb-3 pt-3.5">
+				<div class="grid min-w-0 gap-1">
+					<span class="text-xs text-[var(--muted)]">{ state.Detail.Label }</span>
+					<h2 class="m-0 [overflow-wrap:anywhere] text-lg leading-[1.2] text-[var(--text-strong)]">{ state.Detail.Name }</h2>
 					if state.Detail.Namespace != "" {
 						<div class="updated">{ state.Detail.Namespace }</div>
 					}
 				</div>
-				<button class="icon-button" { closeDetailAttrs()... }>×</button>
+				<button class="icon-button" aria-label="Close details" { closeDetailAttrs()... }>
+					<span class="icon-[lucide--x]" aria-hidden="true"></span>
+				</button>
 			</div>
 			if state.Detail.Error != "" {
 				<div class="notice danger">{ state.Detail.Error }</div>
 			} else {
-				<div class="detail-tabs" role="tablist" aria-label="Detail views">
-					<button { detailTabAttrs("overview", state)... }>Overview</button>
-					<button { detailTabAttrs("events", state)... }>Events</button>
-					<button { detailTabAttrs("yaml", state)... }>YAML</button>
+				<div class="grid grid-cols-3 gap-1 border-b border-[var(--line)] bg-[var(--table-head)] px-3.5 py-2.5" role="tablist" aria-label="Detail views">
+					<button class="h-[30px] min-w-0 cursor-pointer rounded-[7px] border border-transparent bg-transparent text-xs font-[680] text-[var(--muted)] hover:bg-[var(--panel-2)] hover:text-[var(--accent-2)] [&[aria-selected=true]]:border-[var(--accent)] [&[aria-selected=true]]:bg-[var(--status-neutral-bg)] [&[aria-selected=true]]:text-[var(--accent-2)]" { detailTabAttrs("overview", state)... }>Overview</button>
+					<button class="h-[30px] min-w-0 cursor-pointer rounded-[7px] border border-transparent bg-transparent text-xs font-[680] text-[var(--muted)] hover:bg-[var(--panel-2)] hover:text-[var(--accent-2)] [&[aria-selected=true]]:border-[var(--accent)] [&[aria-selected=true]]:bg-[var(--status-neutral-bg)] [&[aria-selected=true]]:text-[var(--accent-2)]" { detailTabAttrs("events", state)... }>Events</button>
+					<button class="h-[30px] min-w-0 cursor-pointer rounded-[7px] border border-transparent bg-transparent text-xs font-[680] text-[var(--muted)] hover:bg-[var(--panel-2)] hover:text-[var(--accent-2)] [&[aria-selected=true]]:border-[var(--accent)] [&[aria-selected=true]]:bg-[var(--status-neutral-bg)] [&[aria-selected=true]]:text-[var(--accent-2)]" { detailTabAttrs("yaml", state)... }>YAML</button>
 				</div>
 				if state.Signals.DetailMode == "events" {
 					@DetailEventsView(state.Detail.Events)
@@ -40,7 +42,7 @@ templ DetailView(state PageState) {
 }
 
 templ DetailOverviewView(state PageState) {
-	<div class="detail-status">
+	<div class="flex items-center gap-2 px-3.5 pt-3 text-xs text-[var(--muted)]">
 		<span class={ "status-pill " + state.Detail.StatusKey }>{ state.Detail.Status }</span>
 		if state.Detail.Age != "" {
 			<span>{ state.Detail.Age }</span>
@@ -79,20 +81,20 @@ templ DetailOverviewView(state PageState) {
 
 templ DetailEventsView(events []kube.ResourceEvent) {
 	if len(events) == 0 {
-		<div class="detail-empty">
-			<h2>Events</h2>
-			<p>No recent events are cached for this resource.</p>
+		<div class="p-[18px] text-[var(--muted)]">
+			<h2 class="m-0 mb-1.5 text-base text-[var(--text-strong)]">Events</h2>
+			<p class="m-0">No recent events are cached for this resource.</p>
 		</div>
 	} else {
 		<div class="event-list">
 			for _, event := range events {
 				<article class={ "event-item " + lower(event.Type) }>
-					<div class="event-head">
-						<span>{ event.Reason }</span>
-						<span>{ event.Age }</span>
+					<div class="flex items-center justify-between gap-2">
+						<span class="font-[720] text-[var(--text-strong)]">{ event.Reason }</span>
+						<span class="text-[11px] text-[var(--muted)]">{ event.Age }</span>
 					</div>
 					<p>{ event.Message }</p>
-					<div class="event-meta">
+					<div class="flex flex-wrap items-center justify-start gap-2 text-[11px] text-[var(--muted)]">
 						<span>{ event.Type }</span>
 						if event.Count > 1 {
 							<span>{ fmt.Sprintf("%d times", event.Count) }</span>
@@ -109,9 +111,9 @@ templ DetailEventsView(events []kube.ResourceEvent) {
 
 templ DetailYAMLView(value string) {
 	if value == "" {
-		<div class="detail-empty">
-			<h2>YAML</h2>
-			<p>YAML is unavailable for this resource.</p>
+		<div class="p-[18px] text-[var(--muted)]">
+			<h2 class="m-0 mb-1.5 text-base text-[var(--text-strong)]">YAML</h2>
+			<p class="m-0">YAML is unavailable for this resource.</p>
 		</div>
 	} else {
 		<pre class="yaml-view"><code>{ value }</code></pre>
@@ -119,8 +121,8 @@ templ DetailYAMLView(value string) {
 }
 
 templ DetailSectionView(section kube.DetailSection) {
-	<section class="detail-section">
-		<h3>{ section.Title }</h3>
+	<section class="border-t border-[var(--line)] px-3.5 pb-3.5 pt-3">
+		<h3 class="m-0 mb-2.5 text-[13px] leading-[1.2]">{ section.Title }</h3>
 		<dl class="detail-list compact">
 			for _, field := range section.Fields {
 				<div>

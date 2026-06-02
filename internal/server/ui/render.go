@@ -137,6 +137,31 @@ func resourceButtonAttrs(def kube.ResourceDef) templ.Attributes {
 	}
 }
 
+func resourceButtonIconClass(kind kube.ResourceKind) string {
+	switch kind {
+	case kube.KindOverview:
+		return "icon-[uil--dashboard]"
+	case kube.KindPods:
+		return "icon-[uil--cube]"
+	case kube.KindDeployments:
+		return "icon-[uil--rocket]"
+	case kube.KindStatefulSet:
+		return "icon-[uil--layers]"
+	case kube.KindDaemonSet:
+		return "icon-[uil--layer-group]"
+	case kube.KindServices:
+		return "icon-[uil--server-alt]"
+	case kube.KindIngresses:
+		return "icon-[uil--globe]"
+	case kube.KindNodes:
+		return "icon-[uil--server-network]"
+	case kube.KindNamespaces:
+		return "icon-[uil--folder-network]"
+	default:
+		return "icon-[uil--servers]"
+	}
+}
+
 func overviewResourceLinkAttrs(kind kube.ResourceKind) templ.Attributes {
 	def := resourceDef(kind)
 	return templ.Attributes{
@@ -146,6 +171,14 @@ func overviewResourceLinkAttrs(kind kube.ResourceKind) templ.Attributes {
 		"data-resource-kind":     string(def.Kind),
 		"data-resource-scope":    def.Scope,
 		"data-on:click":          "$resource = " + signalLiteral(string(def.Kind)) + "; $sortColumn = ''; $sortOrder = ''; $selectedName = ''; $selectedNamespace = ''; $detailMode = 'overview'; @get('/ui/table')",
+	}
+}
+
+func overviewRefreshAttrs() templ.Attributes {
+	return templ.Attributes{
+		"type":                   "button",
+		"data-indicator:loading": true,
+		"data-on:click":          "@get('/ui/refresh')",
 	}
 }
 
@@ -256,17 +289,17 @@ func sortButtonClass(column, sortColumn string) string {
 	return "sort-heading"
 }
 
-func sortIndicator(column, sortColumn, sortOrder string) string {
+func sortIndicatorClass(column, sortColumn, sortOrder string) string {
 	if column != sortColumn {
-		return ""
+		return "sort-indicator"
 	}
 	if sortOrder == "asc" {
-		return "↑"
+		return "sort-indicator icon-[lucide--arrow-up]"
 	}
 	if sortOrder == "desc" {
-		return "↓"
+		return "sort-indicator icon-[lucide--arrow-down]"
 	}
-	return ""
+	return "sort-indicator"
 }
 
 func progressAttrs() templ.Attributes {
