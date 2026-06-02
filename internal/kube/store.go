@@ -12,6 +12,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/version"
@@ -308,8 +309,9 @@ func (s *ResourceStore) loadServerVersion(ctx context.Context) {
 }
 
 func (s *ResourceStore) pollPodMetrics(ctx context.Context, metricsClient metricsclient.Interface) {
+	metricsAPIUnavailableLogged := false
 	if err := s.loadPodMetrics(ctx, metricsClient); err != nil && ctx.Err() == nil {
-		s.logger.Warn("pod metrics unavailable", "error", err)
+		s.logPodMetricsError(err, &metricsAPIUnavailableLogged)
 	}
 
 	ticker := time.NewTicker(10 * time.Second)
@@ -320,7 +322,7 @@ func (s *ResourceStore) pollPodMetrics(ctx context.Context, metricsClient metric
 			return
 		case <-ticker.C:
 			if err := s.loadPodMetrics(ctx, metricsClient); err != nil && ctx.Err() == nil {
-				s.logger.Warn("pod metrics unavailable", "error", err)
+				s.logPodMetricsError(err, &metricsAPIUnavailableLogged)
 			}
 		}
 	}
@@ -347,6 +349,23 @@ func (s *ResourceStore) loadPodMetrics(ctx context.Context, metricsClient metric
 	}
 	s.setPodUsage(podUsage)
 	return nil
+}
+
+func (s *ResourceStore) logPodMetricsError(err error, metricsAPIUnavailableLogged *bool) {
+	if podMetricsAPIUnavailable(err) {
+		if metricsAPIUnavailableLogged == nil || !*metricsAPIUnavailableLogged {
+			s.logger.Info("pod metrics API unavailable; usage columns will remain empty", "error", err)
+		}
+		if metricsAPIUnavailableLogged != nil {
+			*metricsAPIUnavailableLogged = true
+		}
+		return
+	}
+	s.logger.Warn("pod metrics unavailable", "error", err)
+}
+
+func podMetricsAPIUnavailable(err error) bool {
+	return apierrors.IsNotFound(err)
 }
 
 func (s *ResourceStore) readinessError() error {

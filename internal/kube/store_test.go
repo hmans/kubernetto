@@ -1,16 +1,20 @@
 package kube
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 	metricsv1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
@@ -248,6 +252,28 @@ func TestResourceStoreReadsDoNotCallKubeAPI(t *testing.T) {
 
 	if got := len(clientset.Actions()); got != actionsAfterSync {
 		t.Fatalf("client actions after cached reads = %d, want %d", got, actionsAfterSync)
+	}
+}
+
+func TestResourceStoreLogsMissingPodMetricsAPIOnce(t *testing.T) {
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	store := &ResourceStore{logger: logger}
+	err := apierrors.NewNotFound(schema.GroupResource{Group: "metrics.k8s.io", Resource: "pods"}, "")
+
+	logged := false
+	store.logPodMetricsError(err, &logged)
+	store.logPodMetricsError(err, &logged)
+
+	if !logged {
+		t.Fatal("missing pod metrics API was not marked as logged")
+	}
+	output := logs.String()
+	if got := strings.Count(output, "pod metrics API unavailable"); got != 1 {
+		t.Fatalf("missing metrics API log count = %d, want 1; logs:\n%s", got, output)
+	}
+	if strings.Contains(output, "pod metrics unavailable") {
+		t.Fatalf("missing metrics API should not log warning; logs:\n%s", output)
 	}
 }
 
