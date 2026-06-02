@@ -28,6 +28,37 @@ body {
   letter-spacing: 0;
 }
 button, input, select { font: inherit; }
+.page-progress {
+  position: fixed;
+  z-index: 9999;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+.page-progress::before {
+  content: "";
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, var(--accent), var(--accent-2), transparent);
+  transform: translateX(-100%);
+}
+.page-progress.active {
+  opacity: 1;
+}
+.page-progress.active::before {
+  animation: page-progress-slide 900ms cubic-bezier(.4, 0, .2, 1) infinite;
+}
+@keyframes page-progress-slide {
+  0% { transform: translateX(-100%); }
+  55% { transform: translateX(0%); }
+  100% { transform: translateX(100%); }
+}
 .app {
   min-height: 100vh;
   display: grid;

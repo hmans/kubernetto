@@ -86,25 +86,29 @@ func appSignalAttrs(state PageState) templ.Attributes {
 		"data-signals:resource":  "'" + state.Signals.Resource + "'",
 		"data-signals:namespace": "'" + state.Signals.Namespace + "'",
 		"data-signals:query":     "'" + state.Signals.Query + "'",
+		"data-signals:loading":   "false",
 		"data-init":              "@get('/events')",
 	}
 }
 
 func resourceButtonAttrs(def kube.ResourceDef) templ.Attributes {
 	return templ.Attributes{
-		"data-on:click": "$resource = '" + string(def.Kind) + "'; @get('/ui/table')",
+		"data-indicator:loading": true,
+		"data-on:click":          "$resource = '" + string(def.Kind) + "'; @get('/ui/table')",
 	}
 }
 
 func namespaceSelectAttrs() templ.Attributes {
 	return templ.Attributes{
-		"data-bind:namespace": true,
-		"data-on:change":      "@get('/ui/table')",
+		"data-indicator:loading": true,
+		"data-bind:namespace":    true,
+		"data-on:change":         "@get('/ui/table')",
 	}
 }
 
 func searchInputAttrs() templ.Attributes {
 	return templ.Attributes{
+		"data-indicator:loading":        true,
 		"data-bind:query":               true,
 		"data-on:input__debounce.250ms": "@get('/ui/table')",
 	}
@@ -112,6 +116,13 @@ func searchInputAttrs() templ.Attributes {
 
 func refreshButtonAttrs() templ.Attributes {
 	return templ.Attributes{
-		"data-on:click": "@get('/ui/refresh')",
+		"data-indicator:loading": true,
+		"data-on:click":          "@get('/ui/refresh')",
+	}
+}
+
+func progressAttrs() templ.Attributes {
+	return templ.Attributes{
+		"data-class:active": "$loading",
 	}
 }

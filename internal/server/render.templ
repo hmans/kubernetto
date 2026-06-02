@@ -13,6 +13,7 @@ templ Page(state PageState) {
 			<script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0/bundles/datastar.js"></script>
 		</head>
 		<body>
+			<div id="page-progress" class="page-progress" aria-hidden="true" { progressAttrs()... }></div>
 			<div class="app" { appSignalAttrs(state)... }>
 				<aside class="side">
 					<div class="brand">
