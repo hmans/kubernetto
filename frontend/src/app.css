@@ -393,6 +393,12 @@ button, input, select { font: inherit; }
   stroke-width: 20;
   stroke-linecap: butt;
 }
+.overview-stat-card.full .metric-pie-bg {
+  fill: currentColor;
+}
+.overview-stat-card.full .metric-pie-fill {
+  display: none;
+}
 .metric-pie::before {
   content: "";
   position: absolute;

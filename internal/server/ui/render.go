@@ -157,6 +157,9 @@ func overviewStatLinkAttrs(metric kube.OverviewMetric) templ.Attributes {
 	}
 	if metric.Ratio != nil {
 		class += " has-ratio"
+		if boundedPercent(metric.Ratio.Percent) >= 100 {
+			class += " full"
+		}
 	}
 	attrs["class"] = class
 	return attrs
