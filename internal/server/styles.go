@@ -199,7 +199,6 @@ button, input, select { font: inherit; }
   text-align: left;
 }
 .nav button:hover, .nav button[aria-pressed="true"] { background: var(--side-hover); color: var(--side-strong); }
-.scope { color: var(--side-subtle); font-size: 11px; text-transform: uppercase; }
 .main { min-width: 0; padding: 20px 24px 28px; display: grid; gap: 18px; align-content: start; }
 .topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .topbar h1 { margin: 0; color: var(--text-strong); font-size: 22px; line-height: 1.1; }
