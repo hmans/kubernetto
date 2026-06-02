@@ -150,6 +150,51 @@ func overviewResourceLinkAttrs(kind kube.ResourceKind) templ.Attributes {
 	}
 }
 
+func overviewStatLinkAttrs(metric kube.OverviewMetric) templ.Attributes {
+	attrs := overviewResourceLinkAttrs(metric.Kind)
+	class := "overview-link overview-stat-card"
+	if metric.StatusKey != "" {
+		class += " " + metric.StatusKey
+	}
+	if metric.Ratio != nil {
+		class += " has-ratio"
+		if boundedPercent(metric.Ratio.Percent) >= 100 {
+			class += " full"
+		}
+	}
+	attrs["class"] = class
+	return attrs
+}
+
+func metricPieStyle(percent float64) string {
+	return fmt.Sprintf("--value: %.1f;", boundedPercent(percent))
+}
+
+func metricPieDasharray(percent float64) string {
+	return fmt.Sprintf("%.1f 100", boundedPercent(percent))
+}
+
+func boundedPercent(percent float64) float64 {
+	if percent < 0 {
+		return 0
+	}
+	if percent > 100 {
+		return 100
+	}
+	return percent
+}
+
+func metricPieLabel(percent float64) string {
+	return fmt.Sprintf("%.1f%%", percent)
+}
+
+func metricPieAria(metric kube.OverviewMetric) string {
+	if metric.Ratio == nil {
+		return metric.Label
+	}
+	return fmt.Sprintf("%s: %s of %s, %s", metric.Label, metric.Ratio.Numerator, metric.Ratio.Denominator, metricPieLabel(metric.Ratio.Percent))
+}
+
 func namespaceSelectAttrs() templ.Attributes {
 	return templ.Attributes{
 		"data-indicator:loading": true,

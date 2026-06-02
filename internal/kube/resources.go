@@ -83,6 +83,13 @@ type OverviewMetric struct {
 	Detail    string
 	StatusKey string
 	Kind      ResourceKind
+	Ratio     *OverviewRatio
+}
+
+type OverviewRatio struct {
+	Percent     float64
+	Numerator   string
+	Denominator string
 }
 
 type OverviewEvent struct {
