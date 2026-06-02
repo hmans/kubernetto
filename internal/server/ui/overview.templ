@@ -1,23 +1,19 @@
 package ui
 
-import (
-	"fmt"
-
-	"kubernetto/internal/kube"
-)
+import "fmt"
 
 templ OverviewView(state PageState) {
-	<section class="overview" aria-label="Cluster overview">
-		<div class="overview-head">
+	<section class="grid min-w-0 gap-3.5" aria-label="Cluster overview">
+		<div class="flex items-center justify-between gap-3 rounded-lg border border-[var(--line)] bg-[var(--panel)] px-4 py-3.5 shadow-[var(--shadow)]">
 			<div>
-				<h2>Cluster Overview</h2>
+				<h2 class="m-0 text-base leading-[1.2] text-[var(--text-strong)]">Cluster Overview</h2>
 				<div class="updated">{ fmt.Sprintf("updated %s", formatClock(state.Overview.UpdatedAt)) }</div>
 			</div>
 		</div>
 		if state.Overview.Error != "" {
 			<div class="notice danger">{ state.Overview.Error }</div>
 		} else {
-			<div class="overview-stats">
+			<div class="overview-stats grid grid-cols-[repeat(3,minmax(220px,1fr))] gap-3 max-[860px]:grid-cols-1">
 				for _, metric := range state.Overview.Stats {
 					<button { overviewStatLinkAttrs(metric)... }>
 						<div class="metric-copy">
@@ -79,11 +75,11 @@ templ OverviewView(state PageState) {
 				}
 			</section>
 			if len(state.Overview.Identity) > 0 {
-				<section class="overview-panel">
-					<div class="overview-panel-head">
-						<h3>Cluster</h3>
+				<section class="min-w-0 overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--panel)] shadow-[var(--shadow)]">
+					<div class="flex min-h-12 items-center justify-between gap-3 border-b border-[var(--line)] px-3.5 py-3">
+						<h3 class="m-0 text-base leading-[1.2] text-[var(--text-strong)]">Cluster</h3>
 					</div>
-					<dl class="detail-list overview-identity">
+					<dl class="detail-list grid-cols-5 max-[860px]:grid-cols-1">
 						for _, field := range state.Overview.Identity {
 							<div>
 								<dt>{ field.Name }</dt>
@@ -93,23 +89,26 @@ templ OverviewView(state PageState) {
 					</dl>
 				</section>
 			}
-			<section class="overview-panel">
-				<div class="overview-panel-head">
-					<h3>Resources</h3>
+			<section class="min-w-0 overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--panel)] shadow-[var(--shadow)]">
+				<div class="flex min-h-12 items-center justify-between gap-3 border-b border-[var(--line)] px-3.5 py-3">
+					<h3 class="m-0 text-base leading-[1.2] text-[var(--text-strong)]">Resources</h3>
 				</div>
-				<div class="resource-counts">
+				<div class="resource-counts grid grid-cols-[repeat(8,minmax(90px,1fr))] max-[860px]:grid-cols-1">
 					for _, metric := range state.Overview.Resources {
 						<button { overviewResourceLinkAttrs(metric.Kind)... }>
-							<span>{ metric.Label }</span>
-							<strong>{ metric.Value }</strong>
+							<span class="text-xs text-[var(--muted)]">{ metric.Label }</span>
+							<strong class="text-xl leading-none text-[var(--text-strong)]">{ metric.Value }</strong>
 						</button>
 					}
 				</div>
 			</section>
-			<section class="overview-panel">
-				<div class="overview-panel-head">
-					<h3>Recent Warnings</h3>
-					<button { overviewResourceLinkAttrs(kube.KindOverview)... }>Refresh</button>
+			<section class="min-w-0 overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--panel)] shadow-[var(--shadow)]">
+				<div class="flex min-h-12 items-center justify-between gap-3 border-b border-[var(--line)] px-3.5 py-3">
+					<h3 class="m-0 text-base leading-[1.2] text-[var(--text-strong)]">Recent Warnings</h3>
+					<button class="inline-flex cursor-pointer items-center gap-1.5 border-0 bg-transparent text-xs font-[680] text-[var(--accent-2)]" { overviewRefreshAttrs()... }>
+						<span class="icon-[lucide--refresh-cw]" aria-hidden="true"></span>
+						<span>Refresh</span>
+					</button>
 				</div>
 				if len(state.Overview.WarningEvents) == 0 {
 					<div class="empty">No recent warning events are cached.</div>
@@ -117,12 +116,12 @@ templ OverviewView(state PageState) {
 					<div class="event-list overview-events">
 						for _, event := range state.Overview.WarningEvents {
 							<article class="event-item warning">
-								<div class="event-head">
-									<span>{ event.Reason }</span>
-									<span>{ event.Age }</span>
+								<div class="flex items-center justify-between gap-2">
+									<span class="font-[720] text-[var(--text-strong)]">{ event.Reason }</span>
+									<span class="text-[11px] text-[var(--muted)]">{ event.Age }</span>
 								</div>
 								<p>{ event.Message }</p>
-								<div class="event-meta">
+								<div class="flex flex-wrap items-center justify-start gap-2 text-[11px] text-[var(--muted)]">
 									if event.InvolvedObject != "" {
 										<span>{ event.InvolvedObject }</span>
 									}
