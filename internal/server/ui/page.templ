@@ -68,7 +68,7 @@ templ Page(state PageState) {
 }
 
 templ ContentView(state PageState) {
-	<div id="content-grid" class={ contentGridClass(state) }>
+	<div id="content-grid" class={ contentGridClass(state) } { tableAutoRefreshAttrs()... }>
 		@TableView(state)
 		if hasDetail(state) {
 			@DetailView(state)
