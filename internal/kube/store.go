@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -192,6 +191,10 @@ func (s *ResourceStore) Namespaces() ([]string, error) {
 }
 
 func (s *ResourceStore) Table(kind ResourceKind, namespace, query string) Table {
+	return s.TableWithSort(kind, namespace, query, "", "")
+}
+
+func (s *ResourceStore) TableWithSort(kind ResourceKind, namespace, query, sortColumn, sortOrder string) Table {
 	def := resourceDef(kind)
 	table := Table{
 		Kind:       def.Kind,
@@ -274,7 +277,7 @@ func (s *ResourceStore) Table(kind ResourceKind, namespace, query string) Table 
 		}
 	}
 
-	sortRows(table.Rows, table.Namespaced)
+	sortTableRows(&table, sortColumn, sortOrder)
 	return table
 }
 
@@ -390,21 +393,6 @@ func (s *ResourceStore) serverVersionError() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.versionError
-}
-
-func sortRows(rows []Row, namespaced bool) {
-	sort.SliceStable(rows, func(i, j int) bool {
-		left := strings.ToLower(strings.Join(rowSortKey(rows[i], namespaced), "/"))
-		right := strings.ToLower(strings.Join(rowSortKey(rows[j], namespaced), "/"))
-		return left < right
-	})
-}
-
-func rowSortKey(row Row, namespaced bool) []string {
-	if namespaced && len(row.Cells) > 1 {
-		return []string{row.Cells[1].Value, row.Name}
-	}
-	return []string{row.Name}
 }
 
 func (s *ResourceStore) podUsageFor(namespace, name string) corev1.ResourceList {

@@ -77,8 +77,21 @@ button, input, select { font: inherit; }
   width: 32px; height: 32px; border-radius: 7px; display: grid; place-items: center;
   background: #0d9488; color: white; font-weight: 800;
 }
-.context { color: #a8bac2; font-size: 12px; display: grid; gap: 5px; }
+.context { color: #a8bac2; font-size: 12px; display: grid; gap: 6px; }
+.context label { color: #a8bac2; font-size: 12px; }
 .context strong { color: #ffffff; font-size: 13px; overflow-wrap: anywhere; }
+.context select {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 7px;
+  background: #20343d;
+  color: #fff;
+  padding: 0 8px;
+  outline: none;
+}
+.context select:focus { border-color: #2dd4bf; box-shadow: 0 0 0 3px rgba(45,212,191,.16); }
 .nav { display: grid; gap: 5px; }
 .nav button {
   width: 100%;
@@ -179,6 +192,34 @@ button, input, select { font: inherit; }
 table { width: 100%; border-collapse: collapse; min-width: 760px; }
 th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
 th { color: var(--muted); font-size: 12px; background: #f9fbfc; font-weight: 680; }
+th .sort-heading {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  padding: 0;
+  font: inherit;
+  font-weight: inherit;
+}
+th .sort-heading:hover, th .sort-heading.active { color: var(--accent-2); }
+th .sort-heading:focus-visible {
+  outline: 2px solid rgba(13,148,136,.45);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+.sort-indicator {
+  display: inline-grid;
+  place-items: center;
+  width: 10px;
+  color: var(--accent);
+  font-size: 11px;
+  line-height: 1;
+}
 td { color: #25323a; }
 tr:hover td { background: #fbfcfd; }
 .primary { font-weight: 690; color: var(--text); }

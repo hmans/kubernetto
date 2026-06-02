@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 
 type PageState struct {
 	Cluster      *kube.Cluster
+	Clusters     []*kube.Cluster
 	Resources    []kube.ResourceDef
 	Signals      Signals
 	Summary      kube.Summary
@@ -83,18 +85,21 @@ func hasClass(classes, class string) bool {
 
 func appSignalAttrs(state PageState) templ.Attributes {
 	return templ.Attributes{
-		"data-signals:resource":  "'" + state.Signals.Resource + "'",
-		"data-signals:namespace": "'" + state.Signals.Namespace + "'",
-		"data-signals:query":     "'" + state.Signals.Query + "'",
-		"data-signals:loading":   "false",
-		"data-init":              "@get('/events')",
+		"data-signals:context":          signalLiteral(state.Signals.Context),
+		"data-signals:resource":         signalLiteral(state.Signals.Resource),
+		"data-signals:namespace":        signalLiteral(state.Signals.Namespace),
+		"data-signals:query":            signalLiteral(state.Signals.Query),
+		"data-signals:sortColumn":       signalLiteral(state.Signals.SortColumn),
+		"data-signals:sortOrder":        signalLiteral(state.Signals.SortOrder),
+		"data-signals:loading":          "false",
+		"data-on-interval__duration.5s": "@get('/ui/summary')",
 	}
 }
 
 func resourceButtonAttrs(def kube.ResourceDef) templ.Attributes {
 	return templ.Attributes{
 		"data-indicator:loading": true,
-		"data-on:click":          "$resource = '" + string(def.Kind) + "'; @get('/ui/table')",
+		"data-on:click":          "$resource = '" + string(def.Kind) + "'; $sortColumn = ''; $sortOrder = ''; @get('/ui/table')",
 	}
 }
 
@@ -103,6 +108,14 @@ func namespaceSelectAttrs() templ.Attributes {
 		"data-indicator:loading": true,
 		"data-bind:namespace":    true,
 		"data-on:change":         "@get('/ui/table')",
+	}
+}
+
+func contextSelectAttrs() templ.Attributes {
+	return templ.Attributes{
+		"data-indicator:loading": true,
+		"data-bind:context":      true,
+		"data-on:change":         "$namespace = ''; @get('/ui/refresh')",
 	}
 }
 
@@ -121,8 +134,55 @@ func refreshButtonAttrs() templ.Attributes {
 	}
 }
 
+func sortHeaderAttrs(column string) templ.Attributes {
+	columnLiteral := signalLiteral(column)
+	nextOrder := "$sortColumn == " + columnLiteral + " ? ($sortOrder == 'asc' ? 'desc' : ($sortOrder == 'desc' ? '' : 'asc')) : 'asc'"
+	return templ.Attributes{
+		"data-indicator:loading": true,
+		"data-on:click":          "$sortOrder = " + nextOrder + "; $sortColumn = $sortOrder == '' ? '' : " + columnLiteral + "; @get('/ui/table')",
+	}
+}
+
+func sortAria(column, sortColumn, sortOrder string) string {
+	if column != sortColumn {
+		return "none"
+	}
+	switch sortOrder {
+	case "asc":
+		return "ascending"
+	case "desc":
+		return "descending"
+	default:
+		return "none"
+	}
+}
+
+func sortButtonClass(column, sortColumn string) string {
+	if column == sortColumn {
+		return "sort-heading active"
+	}
+	return "sort-heading"
+}
+
+func sortIndicator(column, sortColumn, sortOrder string) string {
+	if column != sortColumn {
+		return ""
+	}
+	if sortOrder == "asc" {
+		return "↑"
+	}
+	if sortOrder == "desc" {
+		return "↓"
+	}
+	return ""
+}
+
 func progressAttrs() templ.Attributes {
 	return templ.Attributes{
 		"data-class:active": "$loading",
 	}
+}
+
+func signalLiteral(value string) string {
+	return strconv.Quote(value)
 }

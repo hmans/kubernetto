@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/kubernetes"
@@ -24,30 +25,29 @@ type Cluster struct {
 	Namespace      string
 	ConfigSource   string
 	KubeconfigPath string
+	Current        bool
 }
 
 func NewCluster(kubeconfig string) (*Cluster, error) {
-	if kubeconfig == "" {
-		kubeconfig = os.Getenv("KUBECONFIG")
+	clusters, err := NewClusters(kubeconfig)
+	if err != nil {
+		return nil, err
 	}
-	if kubeconfig == "" {
-		if home, err := os.UserHomeDir(); err == nil {
-			kubeconfig = filepath.Join(home, ".kube", "config")
-		}
-	}
+	return clusters[0], nil
+}
 
-	if kubeconfig != "" {
-		if cluster, err := fromKubeconfig(kubeconfig); err == nil {
-			return cluster, nil
-		}
+func NewClusters(kubeconfig string) ([]*Cluster, error) {
+	rules, source := kubeconfigLoadingRules(kubeconfig)
+	if clusters, err := fromKubeconfig(rules, source); err == nil {
+		return clusters, nil
 	}
 
 	cfg, err := rest.InClusterConfig()
 	if err != nil {
-		if kubeconfig == "" {
+		if source == "" {
 			return nil, fmt.Errorf("no kubeconfig path found and in-cluster config unavailable: %w", err)
 		}
-		return nil, fmt.Errorf("kubeconfig %q unavailable and in-cluster config unavailable: %w", kubeconfig, err)
+		return nil, fmt.Errorf("kubeconfig %q unavailable and in-cluster config unavailable: %w", source, err)
 	}
 
 	clientset, err := kubernetes.NewForConfig(cfg)
@@ -58,69 +58,76 @@ func NewCluster(kubeconfig string) (*Cluster, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Cluster{
+	return []*Cluster{{
 		Clientset:     clientset,
 		Discovery:     clientset.Discovery(),
 		MetricsClient: metricsClient,
 		ContextName:   "in-cluster",
 		ConfigSource:  "in-cluster service account",
-	}, nil
+		Current:       true,
+	}}, nil
 }
 
-func fromKubeconfig(kubeconfig string) (*Cluster, error) {
-	rules := &clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfig}
+func fromKubeconfig(rules *clientcmd.ClientConfigLoadingRules, source string) ([]*Cluster, error) {
 	raw, err := rules.Load()
 	if err != nil {
 		return nil, err
 	}
-	if raw.CurrentContext == "" {
-		return nil, errors.New("kubeconfig has no current context")
+	if len(raw.Contexts) == 0 {
+		return nil, errors.New("kubeconfig has no contexts")
 	}
 
-	overrides := &clientcmd.ConfigOverrides{}
-	loader := clientcmd.NewNonInteractiveClientConfig(*raw, raw.CurrentContext, overrides, rules)
-	cfg, err := loader.ClientConfig()
-	if err != nil {
-		return nil, err
-	}
-
-	clientset, err := kubernetes.NewForConfig(cfg)
-	if err != nil {
-		return nil, err
-	}
-	metricsClient, err := metricsclient.NewForConfig(cfg)
-	if err != nil {
-		return nil, err
-	}
-
-	contextInfo := raw.Contexts[raw.CurrentContext]
-	namespace := "default"
-	clusterName := ""
-	userName := ""
-	if contextInfo != nil {
-		namespace = contextInfo.Namespace
-		if namespace == "" {
-			namespace = "default"
+	contextNames := orderedContextNames(raw)
+	clusters := make([]*Cluster, 0, len(contextNames))
+	for _, contextName := range contextNames {
+		overrides := &clientcmd.ConfigOverrides{}
+		loader := clientcmd.NewNonInteractiveClientConfig(*raw, contextName, overrides, rules)
+		cfg, err := loader.ClientConfig()
+		if err != nil {
+			return nil, err
 		}
-		clusterName = contextInfo.Cluster
-		userName = contextInfo.AuthInfo
+
+		clientset, err := kubernetes.NewForConfig(cfg)
+		if err != nil {
+			return nil, err
+		}
+		metricsClient, err := metricsclient.NewForConfig(cfg)
+		if err != nil {
+			return nil, err
+		}
+
+		contextInfo := raw.Contexts[contextName]
+		namespace := "default"
+		clusterName := ""
+		userName := ""
+		if contextInfo != nil {
+			namespace = contextInfo.Namespace
+			if namespace == "" {
+				namespace = "default"
+			}
+			clusterName = contextInfo.Cluster
+			userName = contextInfo.AuthInfo
+		}
+
+		clusters = append(clusters, &Cluster{
+			Clientset:      clientset,
+			Discovery:      clientset.Discovery(),
+			MetricsClient:  metricsClient,
+			ContextName:    contextName,
+			ClusterName:    clusterName,
+			UserName:       userName,
+			Namespace:      namespace,
+			ConfigSource:   "kubeconfig",
+			KubeconfigPath: source,
+			Current:        contextName == raw.CurrentContext,
+		})
 	}
 
-	return &Cluster{
-		Clientset:      clientset,
-		Discovery:      clientset.Discovery(),
-		MetricsClient:  metricsClient,
-		ContextName:    raw.CurrentContext,
-		ClusterName:    clusterName,
-		UserName:       userName,
-		Namespace:      namespace,
-		ConfigSource:   "kubeconfig",
-		KubeconfigPath: kubeconfig,
-	}, nil
+	return clusters, nil
 }
 
 func CurrentContext(kubeconfig string) (*api.Context, string, error) {
-	rules := &clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfig}
+	rules, _ := kubeconfigLoadingRules(kubeconfig)
 	raw, err := rules.Load()
 	if err != nil {
 		return nil, "", err
@@ -130,4 +137,32 @@ func CurrentContext(kubeconfig string) (*api.Context, string, error) {
 		return nil, raw.CurrentContext, errors.New("current context not found")
 	}
 	return ctx, raw.CurrentContext, nil
+}
+
+func kubeconfigLoadingRules(kubeconfig string) (*clientcmd.ClientConfigLoadingRules, string) {
+	if kubeconfig != "" {
+		return &clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeconfig}, kubeconfig
+	}
+	if env := os.Getenv(clientcmd.RecommendedConfigPathEnvVar); env != "" {
+		return clientcmd.NewDefaultClientConfigLoadingRules(), env
+	}
+	homeFile := ""
+	if home, err := os.UserHomeDir(); err == nil {
+		homeFile = filepath.Join(home, ".kube", "config")
+	}
+	return clientcmd.NewDefaultClientConfigLoadingRules(), homeFile
+}
+
+func orderedContextNames(raw *api.Config) []string {
+	contextNames := make([]string, 0, len(raw.Contexts))
+	for name := range raw.Contexts {
+		if name != raw.CurrentContext {
+			contextNames = append(contextNames, name)
+		}
+	}
+	sort.Strings(contextNames)
+	if raw.CurrentContext != "" {
+		contextNames = append([]string{raw.CurrentContext}, contextNames...)
+	}
+	return contextNames
 }
