@@ -12,6 +12,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/version"
 	"k8s.io/client-go/informers"
@@ -19,6 +20,7 @@ import (
 	corelisters "k8s.io/client-go/listers/core/v1"
 	networkinglisters "k8s.io/client-go/listers/networking/v1"
 	"k8s.io/client-go/tools/cache"
+	metricsclient "k8s.io/metrics/pkg/client/clientset/versioned"
 )
 
 const cacheWarmingMessage = "Kubernetes cache is warming up."
@@ -36,6 +38,7 @@ type ResourceStore struct {
 	serverVersion string
 	versionError  string
 	errorMessage  string
+	podUsage      map[string]corev1.ResourceList
 
 	pods         corelisters.PodLister
 	events       corelisters.EventLister
@@ -63,6 +66,7 @@ func NewResourceStore(cluster *Cluster, logger *slog.Logger) *ResourceStore {
 	}
 
 	store.factory = informers.NewSharedInformerFactory(cluster.Clientset, 0)
+	store.podUsage = map[string]corev1.ResourceList{}
 
 	pods := store.factory.Core().V1().Pods()
 	events := store.factory.Core().V1().Events()
@@ -108,6 +112,9 @@ func (s *ResourceStore) Start(ctx context.Context) {
 
 	if s.cluster.Discovery != nil {
 		go s.loadServerVersion(ctx)
+	}
+	if s.cluster.MetricsClient != nil {
+		go s.pollPodMetrics(ctx, s.cluster.MetricsClient)
 	}
 
 	s.factory.Start(ctx.Done())
@@ -208,33 +215,33 @@ func (s *ResourceStore) TableWithSort(kind ResourceKind, namespace, query, sortC
 
 	switch def.Kind {
 	case KindPods:
-		table.Columns = []string{"Name", "Namespace", "Ready", "Status", "Restarts", "Node", "Age"}
+		table.Columns = []string{"Name", "Namespace", "Ready", "Status", "Restarts", "CPU", "CPU Req", "CPU Limit", "MEM", "MEM Req", "MEM Limit", "Node", "Age"}
 		for _, pod := range s.listPods(namespace) {
-			row := podRow(*pod)
+			row := podRow(*pod, s.podUsageFor(pod.Namespace, pod.Name))
 			if matches(row, query) {
 				table.Rows = append(table.Rows, row)
 			}
 		}
 	case KindDeployments:
-		table.Columns = []string{"Name", "Namespace", "Ready", "Up-to-date", "Available", "Age"}
+		table.Columns = []string{"Name", "Namespace", "Ready", "Up-to-date", "Available", "CPU", "CPU Req", "CPU Limit", "MEM", "MEM Req", "MEM Limit", "Age"}
 		for _, deployment := range s.listDeployments(namespace) {
-			row := deploymentRow(*deployment)
+			row := deploymentRow(*deployment, s.podUsageForSelector(deployment.Namespace, deployment.Spec.Selector))
 			if matches(row, query) {
 				table.Rows = append(table.Rows, row)
 			}
 		}
 	case KindStatefulSet:
-		table.Columns = []string{"Name", "Namespace", "Ready", "Replicas", "Age"}
+		table.Columns = []string{"Name", "Namespace", "Ready", "Replicas", "CPU", "CPU Req", "CPU Limit", "MEM", "MEM Req", "MEM Limit", "Age"}
 		for _, statefulSet := range s.listStatefulSets(namespace) {
-			row := statefulSetRow(*statefulSet)
+			row := statefulSetRow(*statefulSet, s.podUsageForSelector(statefulSet.Namespace, statefulSet.Spec.Selector))
 			if matches(row, query) {
 				table.Rows = append(table.Rows, row)
 			}
 		}
 	case KindDaemonSet:
-		table.Columns = []string{"Name", "Namespace", "Desired", "Ready", "Available", "Age"}
+		table.Columns = []string{"Name", "Namespace", "Desired", "Ready", "Available", "CPU", "CPU Req", "CPU Limit", "MEM", "MEM Req", "MEM Limit", "Age"}
 		for _, daemonSet := range s.listDaemonSets(namespace) {
-			row := daemonSetRow(*daemonSet)
+			row := daemonSetRow(*daemonSet, s.podUsageForSelector(daemonSet.Namespace, daemonSet.Spec.Selector))
 			if matches(row, query) {
 				table.Rows = append(table.Rows, row)
 			}
@@ -300,6 +307,48 @@ func (s *ResourceStore) loadServerVersion(ctx context.Context) {
 	}
 }
 
+func (s *ResourceStore) pollPodMetrics(ctx context.Context, metricsClient metricsclient.Interface) {
+	if err := s.loadPodMetrics(ctx, metricsClient); err != nil && ctx.Err() == nil {
+		s.logger.Warn("pod metrics unavailable", "error", err)
+	}
+
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := s.loadPodMetrics(ctx, metricsClient); err != nil && ctx.Err() == nil {
+				s.logger.Warn("pod metrics unavailable", "error", err)
+			}
+		}
+	}
+}
+
+func (s *ResourceStore) loadPodMetrics(ctx context.Context, metricsClient metricsclient.Interface) error {
+	if s == nil || metricsClient == nil {
+		return nil
+	}
+	list, err := metricsClient.MetricsV1beta1().PodMetricses("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return err
+	}
+
+	podUsage := make(map[string]corev1.ResourceList, len(list.Items))
+	for _, metrics := range list.Items {
+		usage := corev1.ResourceList{}
+		for _, container := range metrics.Containers {
+			addResourceList(usage, container.Usage)
+		}
+		if len(usage) > 0 {
+			podUsage[podKey(metrics.Namespace, metrics.Name)] = usage
+		}
+	}
+	s.setPodUsage(podUsage)
+	return nil
+}
+
 func (s *ResourceStore) readinessError() error {
 	if s == nil || s.cluster == nil || s.cluster.Clientset == nil {
 		return fmt.Errorf("No Kubernetes client is configured.")
@@ -331,6 +380,12 @@ func (s *ResourceStore) setVersionError(message string) {
 	s.versionError = message
 }
 
+func (s *ResourceStore) setPodUsage(podUsage map[string]corev1.ResourceList) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.podUsage = podUsage
+}
+
 func (s *ResourceStore) serverVersionValue() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -341,6 +396,57 @@ func (s *ResourceStore) serverVersionError() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.versionError
+}
+
+func (s *ResourceStore) podUsageFor(namespace, name string) corev1.ResourceList {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return copyResourceList(s.podUsage[podKey(namespace, name)])
+}
+
+func (s *ResourceStore) podUsageForSelector(namespace string, selector *metav1.LabelSelector) corev1.ResourceList {
+	if selector == nil {
+		return nil
+	}
+	labelSelector, err := metav1.LabelSelectorAsSelector(selector)
+	if err != nil || labels.MatchesNothing(labelSelector) {
+		return nil
+	}
+
+	total := corev1.ResourceList{}
+	for _, pod := range s.listPods(namespace) {
+		if labelSelector.Matches(labels.Set(pod.Labels)) {
+			addResourceList(total, s.podUsageFor(pod.Namespace, pod.Name))
+		}
+	}
+	if len(total) == 0 {
+		return nil
+	}
+	return total
+}
+
+func podKey(namespace, name string) string {
+	return namespace + "/" + name
+}
+
+func copyResourceList(values corev1.ResourceList) corev1.ResourceList {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make(corev1.ResourceList, len(values))
+	addResourceList(out, values)
+	return out
+}
+
+func addResourceList(total, values corev1.ResourceList) {
+	for name, quantity := range values {
+		if quantity.Sign() == 0 {
+			continue
+		}
+		current := total[name]
+		current.Add(quantity)
+		total[name] = current
+	}
 }
 
 func (s *ResourceStore) listPods(namespace string) []*corev1.Pod {

@@ -10,6 +10,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -200,53 +201,53 @@ func (c *Cluster) TableWithSort(ctx context.Context, kind ResourceKind, namespac
 
 	switch def.Kind {
 	case KindPods:
-		table.Columns = []string{"Name", "Namespace", "Ready", "Status", "Restarts", "Node", "Age"}
+		table.Columns = []string{"Name", "Namespace", "Ready", "Status", "Restarts", "CPU", "CPU Req", "CPU Limit", "MEM", "MEM Req", "MEM Limit", "Node", "Age"}
 		list, err := c.Clientset.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			table.Error = err.Error()
 			return table
 		}
 		for _, pod := range list.Items {
-			row := podRow(pod)
+			row := podRow(pod, nil)
 			if matches(row, query) {
 				table.Rows = append(table.Rows, row)
 			}
 		}
 	case KindDeployments:
-		table.Columns = []string{"Name", "Namespace", "Ready", "Up-to-date", "Available", "Age"}
+		table.Columns = []string{"Name", "Namespace", "Ready", "Up-to-date", "Available", "CPU", "CPU Req", "CPU Limit", "MEM", "MEM Req", "MEM Limit", "Age"}
 		list, err := c.Clientset.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			table.Error = err.Error()
 			return table
 		}
 		for _, deployment := range list.Items {
-			row := deploymentRow(deployment)
+			row := deploymentRow(deployment, nil)
 			if matches(row, query) {
 				table.Rows = append(table.Rows, row)
 			}
 		}
 	case KindStatefulSet:
-		table.Columns = []string{"Name", "Namespace", "Ready", "Replicas", "Age"}
+		table.Columns = []string{"Name", "Namespace", "Ready", "Replicas", "CPU", "CPU Req", "CPU Limit", "MEM", "MEM Req", "MEM Limit", "Age"}
 		list, err := c.Clientset.AppsV1().StatefulSets(namespace).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			table.Error = err.Error()
 			return table
 		}
 		for _, statefulSet := range list.Items {
-			row := statefulSetRow(statefulSet)
+			row := statefulSetRow(statefulSet, nil)
 			if matches(row, query) {
 				table.Rows = append(table.Rows, row)
 			}
 		}
 	case KindDaemonSet:
-		table.Columns = []string{"Name", "Namespace", "Desired", "Ready", "Available", "Age"}
+		table.Columns = []string{"Name", "Namespace", "Desired", "Ready", "Available", "CPU", "CPU Req", "CPU Limit", "MEM", "MEM Req", "MEM Limit", "Age"}
 		list, err := c.Clientset.AppsV1().DaemonSets(namespace).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			table.Error = err.Error()
 			return table
 		}
 		for _, daemonSet := range list.Items {
-			row := daemonSetRow(daemonSet)
+			row := daemonSetRow(daemonSet, nil)
 			if matches(row, query) {
 				table.Rows = append(table.Rows, row)
 			}
@@ -319,7 +320,7 @@ func resourceDef(kind ResourceKind) ResourceDef {
 	return ResourceDefs[0]
 }
 
-func podRow(pod corev1.Pod) Row {
+func podRow(pod corev1.Pod, usage corev1.ResourceList) Row {
 	ready := 0
 	restarts := int32(0)
 	for _, status := range pod.Status.ContainerStatuses {
@@ -344,13 +345,19 @@ func podRow(pod corev1.Pod) Row {
 			{Value: fmt.Sprintf("%d/%d", ready, total)},
 			{Value: status, Class: "status " + healthKey(status == "Running" && ready == total)},
 			{Value: fmt.Sprint(restarts)},
+			{Value: resourceListValue(usage, corev1.ResourceCPU)},
+			{Value: containerResourceValue(pod.Spec.Containers, resourceRequests, corev1.ResourceCPU)},
+			{Value: containerResourceValue(pod.Spec.Containers, resourceLimits, corev1.ResourceCPU)},
+			{Value: resourceListValue(usage, corev1.ResourceMemory)},
+			{Value: containerResourceValue(pod.Spec.Containers, resourceRequests, corev1.ResourceMemory)},
+			{Value: containerResourceValue(pod.Spec.Containers, resourceLimits, corev1.ResourceMemory)},
 			{Value: pod.Spec.NodeName},
 			{Value: age(pod.CreationTimestamp.Time)},
 		},
 	}
 }
 
-func deploymentRow(deployment appsv1.Deployment) Row {
+func deploymentRow(deployment appsv1.Deployment, usage corev1.ResourceList) Row {
 	desired := int32(0)
 	if deployment.Spec.Replicas != nil {
 		desired = *deployment.Spec.Replicas
@@ -367,12 +374,18 @@ func deploymentRow(deployment appsv1.Deployment) Row {
 			{Value: fmt.Sprintf("%d/%d", deployment.Status.ReadyReplicas, desired), Class: "status " + healthKey(healthy)},
 			{Value: fmt.Sprint(deployment.Status.UpdatedReplicas)},
 			{Value: fmt.Sprint(deployment.Status.AvailableReplicas)},
+			{Value: resourceListValue(usage, corev1.ResourceCPU)},
+			{Value: containerResourceValue(deployment.Spec.Template.Spec.Containers, resourceRequests, corev1.ResourceCPU)},
+			{Value: containerResourceValue(deployment.Spec.Template.Spec.Containers, resourceLimits, corev1.ResourceCPU)},
+			{Value: resourceListValue(usage, corev1.ResourceMemory)},
+			{Value: containerResourceValue(deployment.Spec.Template.Spec.Containers, resourceRequests, corev1.ResourceMemory)},
+			{Value: containerResourceValue(deployment.Spec.Template.Spec.Containers, resourceLimits, corev1.ResourceMemory)},
 			{Value: age(deployment.CreationTimestamp.Time)},
 		},
 	}
 }
 
-func statefulSetRow(statefulSet appsv1.StatefulSet) Row {
+func statefulSetRow(statefulSet appsv1.StatefulSet, usage corev1.ResourceList) Row {
 	desired := statefulSet.Spec.Replicas
 	if desired == nil {
 		zero := int32(0)
@@ -389,12 +402,18 @@ func statefulSetRow(statefulSet appsv1.StatefulSet) Row {
 			{Value: statefulSet.Namespace},
 			{Value: fmt.Sprintf("%d/%d", statefulSet.Status.ReadyReplicas, *desired), Class: "status " + healthKey(healthy)},
 			{Value: fmt.Sprint(statefulSet.Status.Replicas)},
+			{Value: resourceListValue(usage, corev1.ResourceCPU)},
+			{Value: containerResourceValue(statefulSet.Spec.Template.Spec.Containers, resourceRequests, corev1.ResourceCPU)},
+			{Value: containerResourceValue(statefulSet.Spec.Template.Spec.Containers, resourceLimits, corev1.ResourceCPU)},
+			{Value: resourceListValue(usage, corev1.ResourceMemory)},
+			{Value: containerResourceValue(statefulSet.Spec.Template.Spec.Containers, resourceRequests, corev1.ResourceMemory)},
+			{Value: containerResourceValue(statefulSet.Spec.Template.Spec.Containers, resourceLimits, corev1.ResourceMemory)},
 			{Value: age(statefulSet.CreationTimestamp.Time)},
 		},
 	}
 }
 
-func daemonSetRow(daemonSet appsv1.DaemonSet) Row {
+func daemonSetRow(daemonSet appsv1.DaemonSet, usage corev1.ResourceList) Row {
 	healthy := daemonSet.Status.NumberReady == daemonSet.Status.DesiredNumberScheduled
 	return Row{
 		Name:      daemonSet.Name,
@@ -407,6 +426,12 @@ func daemonSetRow(daemonSet appsv1.DaemonSet) Row {
 			{Value: fmt.Sprint(daemonSet.Status.DesiredNumberScheduled)},
 			{Value: fmt.Sprint(daemonSet.Status.NumberReady), Class: "status " + healthKey(healthy)},
 			{Value: fmt.Sprint(daemonSet.Status.NumberAvailable)},
+			{Value: resourceListValue(usage, corev1.ResourceCPU)},
+			{Value: containerResourceValue(daemonSet.Spec.Template.Spec.Containers, resourceRequests, corev1.ResourceCPU)},
+			{Value: containerResourceValue(daemonSet.Spec.Template.Spec.Containers, resourceLimits, corev1.ResourceCPU)},
+			{Value: resourceListValue(usage, corev1.ResourceMemory)},
+			{Value: containerResourceValue(daemonSet.Spec.Template.Spec.Containers, resourceRequests, corev1.ResourceMemory)},
+			{Value: containerResourceValue(daemonSet.Spec.Template.Spec.Containers, resourceLimits, corev1.ResourceMemory)},
 			{Value: age(daemonSet.CreationTimestamp.Time)},
 		},
 	}
@@ -584,6 +609,84 @@ func mapBool(ok bool, yes, no string) string {
 		return yes
 	}
 	return no
+}
+
+type resourceSelector func(corev1.ResourceRequirements) corev1.ResourceList
+
+func resourceRequests(resources corev1.ResourceRequirements) corev1.ResourceList {
+	return resources.Requests
+}
+
+func resourceLimits(resources corev1.ResourceRequirements) corev1.ResourceList {
+	return resources.Limits
+}
+
+func containerResourceValue(containers []corev1.Container, selector resourceSelector, name corev1.ResourceName) string {
+	var total resource.Quantity
+	for _, container := range containers {
+		quantity, ok := selector(container.Resources)[name]
+		if ok {
+			total.Add(quantity)
+		}
+	}
+	return resourceQuantityValue(name, total)
+}
+
+func resourceListValue(values corev1.ResourceList, name corev1.ResourceName) string {
+	quantity, ok := values[name]
+	if !ok {
+		return "-"
+	}
+	return resourceQuantityValue(name, quantity)
+}
+
+func resourceQuantityValue(name corev1.ResourceName, quantity resource.Quantity) string {
+	if quantity.Sign() == 0 {
+		return "-"
+	}
+	switch name {
+	case corev1.ResourceCPU:
+		return cpuValue(quantity)
+	case corev1.ResourceMemory:
+		return byteValue(quantity.Value())
+	default:
+		return quantity.String()
+	}
+}
+
+func cpuValue(quantity resource.Quantity) string {
+	milli := quantity.MilliValue()
+	if milli%1000 == 0 {
+		return fmt.Sprintf("%d", milli/1000)
+	}
+	return fmt.Sprintf("%dm", milli)
+}
+
+func byteValue(bytes int64) string {
+	if bytes == 0 {
+		return "0"
+	}
+
+	units := []struct {
+		name  string
+		value int64
+	}{
+		{"Ei", 1 << 60},
+		{"Pi", 1 << 50},
+		{"Ti", 1 << 40},
+		{"Gi", 1 << 30},
+		{"Mi", 1 << 20},
+		{"Ki", 1 << 10},
+	}
+	for _, unit := range units {
+		if bytes >= unit.value {
+			if bytes%unit.value == 0 {
+				return fmt.Sprintf("%d%s", bytes/unit.value, unit.name)
+			}
+			return strings.TrimSuffix(strings.TrimSuffix(fmt.Sprintf("%.1f", float64(bytes)/float64(unit.value)), "0"), ".") + unit.name
+		}
+	}
+	return fmt.Sprintf("%dB", bytes)
 }
 
 func age(t time.Time) string {
