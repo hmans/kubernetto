@@ -470,7 +470,7 @@ func (s *ResourceStore) appendPodUsageHistory(podUsage map[string]corev1.Resourc
 	if len(podUsage) == 0 {
 		return
 	}
-	cutoff := now.Add(-60 * time.Minute)
+	cutoff := now.Add(-usageMetricsWindow)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for key, usage := range podUsage {

@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	prometheusWindow = 60 * time.Minute
-	prometheusStep   = 60 * time.Second
+	usageMetricsWindow = 60 * time.Minute
+	prometheusStep     = 60 * time.Second
 )
 
 type prometheusTarget struct {
@@ -52,7 +52,7 @@ func (s *ResourceStore) loadPrometheusTimelines(ctx context.Context) (map[string
 	}
 
 	end := time.Now()
-	start := end.Add(-prometheusWindow)
+	start := end.Add(-usageMetricsWindow)
 	var lastErr error
 	for _, target := range targets {
 		cpuSeries, err := s.queryPrometheusRange(ctx, target, podCPUQuery, start, end, prometheusStep)
@@ -89,7 +89,7 @@ func (s *ResourceStore) loadPrometheusTimelinesForQueries(ctx context.Context, c
 	}
 
 	end := time.Now()
-	start := end.Add(-prometheusWindow)
+	start := end.Add(-usageMetricsWindow)
 	var lastErr error
 	for _, target := range targets {
 		cpuSeries, err := s.queryPrometheusRange(ctx, target, cpuQuery, start, end, prometheusStep)
@@ -294,8 +294,13 @@ func (s *ResourceStore) podUsageHistoryMap() map[string][]UsageSample {
 	defer s.mu.RUnlock()
 	source := s.podUsageHistory
 	out := make(map[string][]UsageSample, len(source))
+	cutoff := time.Now().Add(-usageMetricsWindow)
 	for key, samples := range source {
-		out[key] = append([]UsageSample(nil), samples...)
+		trimmed := trimUsageSamples(samples, cutoff)
+		if len(trimmed) == 0 {
+			continue
+		}
+		out[key] = append([]UsageSample(nil), trimmed...)
 	}
 	return out
 }
@@ -305,7 +310,7 @@ func (s *ResourceStore) podUsageTimelineFor(namespace, name string) []UsageSampl
 	defer s.mu.RUnlock()
 	key := podKey(namespace, name)
 	samples := s.podUsageHistory[key]
-	return append([]UsageSample(nil), samples...)
+	return append([]UsageSample(nil), trimUsageSamples(samples, time.Now().Add(-usageMetricsWindow))...)
 }
 
 func (s *ResourceStore) prometheusTargetCount() int {
