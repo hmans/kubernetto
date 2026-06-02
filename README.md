@@ -22,6 +22,14 @@ go run ./cmd/kubernetto --addr 127.0.0.1:9833 --kubeconfig ~/.kube/config
 go build -o kubernetto ./cmd/kubernetto
 ```
 
+## Templates
+
+The UI is built with templ components. After editing `*.templ` files, regenerate the checked-in Go output:
+
+```sh
+go generate ./...
+```
+
 ## Current Scope
 
 - Cluster summary with live Data-Star SSE refresh.

@@ -33,6 +33,7 @@ func New(cluster *kube.Cluster, logger *slog.Logger) *Server {
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", s.handleIndex)
+	mux.HandleFunc("GET /assets/app.css", s.handleStyles)
 	mux.HandleFunc("GET /ui/refresh", s.handleRefresh)
 	mux.HandleFunc("GET /ui/table", s.handleTable)
 	mux.HandleFunc("GET /events", s.handleEvents)
@@ -168,7 +169,7 @@ func withSecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-eval' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; connect-src 'self' https://cdn.jsdelivr.net; img-src 'self' data:")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-eval' https://cdn.jsdelivr.net; style-src 'self'; connect-src 'self' https://cdn.jsdelivr.net; img-src 'self' data:")
 		next.ServeHTTP(w, r)
 	})
 }

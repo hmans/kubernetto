@@ -1,0 +1,158 @@
+package server
+
+import "fmt"
+
+templ Page(state PageState) {
+	<!doctype html>
+	<html lang="en">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>Kubernetto</title>
+			<link rel="stylesheet" href="/assets/app.css"/>
+			<script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0/bundles/datastar.js"></script>
+		</head>
+		<body>
+			<div class="app" { appSignalAttrs(state)... }>
+				<aside class="side">
+					<div class="brand">
+						<div class="brand-mark">K</div>
+						<div>Kubernetto</div>
+					</div>
+					<div class="context">
+						<span>Context</span>
+						if state.Cluster != nil {
+							<strong>{ state.Cluster.ContextName }</strong>
+							<span>{ state.Cluster.ConfigSource }</span>
+						} else {
+							<strong>unconfigured</strong>
+							<span>kubeconfig unavailable</span>
+						}
+					</div>
+					@ResourceNavView(state)
+				</aside>
+				<main class="main">
+					<div class="topbar">
+						<h1>Cluster Dashboard</h1>
+						<div class="updated">Live summary every 5s</div>
+					</div>
+					@SummaryView(state)
+					<section class="toolbar" aria-label="Table controls">
+						@NamespacePickerView(state)
+						<div class="field">
+							<label for="query">Search</label>
+							<input id="query" type="search" placeholder="Filter visible fields" { searchInputAttrs()... }/>
+						</div>
+						<button class="icon-button" type="button" title="Refresh" { refreshButtonAttrs()... }>↻</button>
+					</section>
+					@TableView(state)
+				</main>
+			</div>
+		</body>
+	</html>
+}
+
+templ SummaryView(state PageState) {
+	<section id="summary" class="summary" aria-label="Cluster summary">
+		if state.Summary.Error != "" {
+			<div class="notice danger" style="grid-column: 1 / -1">{ state.Summary.Error }</div>
+		}
+		<div class="metric">
+			<div class="label">Version</div>
+			<div class="value">
+				if state.Summary.ServerVersion != "" {
+					{ state.Summary.ServerVersion }
+				} else {
+					unknown
+				}
+			</div>
+		</div>
+		<div class="metric">
+			<div class="label">Nodes</div>
+			<div class="value">{ fmt.Sprint(state.Summary.Nodes) }</div>
+		</div>
+		<div class="metric">
+			<div class="label">Pods</div>
+			<div class="value">{ fmt.Sprint(state.Summary.Pods) }</div>
+		</div>
+		<div class="metric">
+			<div class="label">Deployments</div>
+			<div class="value">{ fmt.Sprint(state.Summary.Deployments) }</div>
+		</div>
+	</section>
+}
+
+templ ResourceNavView(state PageState) {
+	<nav id="resource-nav" class="nav" aria-label="Resources">
+		for _, resource := range state.Resources {
+			<button
+				type="button"
+				aria-pressed={ checked(state.Signals.Resource, string(resource.Kind)) }
+				{ resourceButtonAttrs(resource)... }
+			>
+				<span>{ resource.Label }</span>
+				<span class="scope">{ resource.Scope }</span>
+			</button>
+		}
+	</nav>
+}
+
+templ NamespacePickerView(state PageState) {
+	<div id="namespace-picker" class="field">
+		<label for="namespace">Namespace</label>
+		<select
+			id="namespace"
+			disabled?={ !state.Table.Namespaced }
+			{ namespaceSelectAttrs()... }
+		>
+			<option value="">All namespaces</option>
+			for _, namespace := range state.Namespaces {
+				<option value={ namespace } selected?={ state.Signals.Namespace == namespace }>{ namespace }</option>
+			}
+		</select>
+		if state.NamespaceErr != "" {
+			<span class="updated">{ state.NamespaceErr }</span>
+		}
+	</div>
+}
+
+templ TableView(state PageState) {
+	<section id="table-panel" class="table-panel" aria-live="polite">
+		<div class="table-head">
+			<h2>{ state.Table.Label }</h2>
+			<div class="updated">{ fmt.Sprintf("%d rows · updated %s", len(state.Table.Rows), formatClock(state.Table.UpdatedAt)) }</div>
+		</div>
+		if state.Table.Error != "" {
+			<div class="notice danger">{ state.Table.Error }</div>
+		} else if len(state.Table.Rows) == 0 {
+			<div class="empty">No { lower(state.Table.Label) } found.</div>
+		} else {
+			<div class="table-wrap">
+				<table>
+					<thead>
+						<tr>
+							for _, column := range state.Table.Columns {
+								<th scope="col">{ column }</th>
+							}
+						</tr>
+					</thead>
+					<tbody>
+						for _, row := range state.Table.Rows {
+							<tr>
+								for _, cell := range row.Cells {
+									<td class={ cell.Class }>
+										if hasClass(cell.Class, "status") {
+											<span>{ cell.Value }</span>
+										} else {
+											{ cell.Value }
+										}
+									</td>
+								}
+							</tr>
+						}
+					</tbody>
+				</table>
+			</div>
+		}
+	</section>
+}
