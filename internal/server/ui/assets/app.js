@@ -24,6 +24,7 @@ const defaultUrlState = {
 };
 let urlSyncTimer = 0;
 let querySyncTimer = 0;
+let restoringHistory = false;
 
 function savedTheme() {
   try {
@@ -118,7 +119,7 @@ function normalizeUrlState(state) {
   return next;
 }
 
-function writeUrlState(state) {
+function writeUrlState(state, mode = "replace") {
   if (!window.history?.replaceState) {
     return;
   }
@@ -135,17 +136,23 @@ function writeUrlState(state) {
   }
   const nextURL = url.pathname + url.search + url.hash;
   if (nextURL !== window.location.pathname + window.location.search + window.location.hash) {
-    window.history.replaceState(null, "", nextURL);
+    const historyMethod = mode === "push" && window.history.pushState ? "pushState" : "replaceState";
+    window.history[historyMethod](nextState, "", nextURL);
+  } else {
+    window.history.replaceState(nextState, "", nextURL);
   }
 }
 
-function syncUrlState(patch = {}) {
-  writeUrlState({ ...readUrlState(), ...readDOMState(), ...patch });
+function syncUrlState(patch = {}, options = {}) {
+  if (restoringHistory) {
+    return;
+  }
+  writeUrlState({ ...readUrlState(), ...readDOMState(), ...patch }, options.mode);
 }
 
-function scheduleUrlSync(patch = {}, delay = 0) {
+function scheduleUrlSync(patch = {}, delay = 0, options = {}) {
   window.clearTimeout(urlSyncTimer);
-  urlSyncTimer = window.setTimeout(() => syncUrlState(patch), delay);
+  urlSyncTimer = window.setTimeout(() => syncUrlState(patch, options), delay);
 }
 
 function currentSortState() {
@@ -195,9 +202,7 @@ document.addEventListener("click", (event) => {
     if (resourceButton.dataset.resourceScope === "cluster") {
       patch.namespace = "";
     }
-    syncUrlState({
-      ...patch,
-    });
+    syncUrlState({ ...patch }, { mode: "push" });
     return;
   }
 
@@ -208,7 +213,7 @@ document.addEventListener("click", (event) => {
       selectedName: "",
       selectedNamespace: "",
       detailMode: "overview",
-    });
+    }, { mode: "push" });
     return;
   }
 
@@ -218,18 +223,18 @@ document.addEventListener("click", (event) => {
       selectedName: row.dataset.rowName || "",
       selectedNamespace: row.dataset.rowNamespace || "",
       detailMode: "overview",
-    });
+    }, { mode: "push" });
     return;
   }
 
   if (event.target.closest("[data-close-detail]")) {
-    syncUrlState({ selectedName: "", selectedNamespace: "", detailMode: "overview" });
+    syncUrlState({ selectedName: "", selectedNamespace: "", detailMode: "overview" }, { mode: "push" });
     return;
   }
 
   const detailModeButton = event.target.closest("[data-detail-mode]");
   if (detailModeButton) {
-    syncUrlState({ detailMode: detailModeButton.dataset.detailMode || "overview" });
+    syncUrlState({ detailMode: detailModeButton.dataset.detailMode || "overview" }, { mode: "push" });
     return;
   }
 
@@ -248,7 +253,7 @@ document.addEventListener("keydown", (event) => {
     selectedName: row.dataset.rowName || "",
     selectedNamespace: row.dataset.rowNamespace || "",
     detailMode: "overview",
-  });
+  }, { mode: "push" });
 });
 
 document.addEventListener("change", (event) => {
@@ -261,14 +266,14 @@ document.addEventListener("change", (event) => {
       selectedName: "",
       selectedNamespace: "",
       detailMode: "overview",
-    });
+    }, { mode: "push" });
   } else if (event.target.matches("#namespace")) {
     syncUrlState({
       namespace: event.target.value,
       selectedName: "",
       selectedNamespace: "",
       detailMode: "overview",
-    });
+    }, { mode: "push" });
   }
 });
 
@@ -283,8 +288,15 @@ document.addEventListener("input", (event) => {
       selectedName: "",
       selectedNamespace: "",
       detailMode: "overview",
-    });
+    }, { mode: "push" });
   }, 250);
+});
+
+window.addEventListener("popstate", () => {
+  restoringHistory = true;
+  window.clearTimeout(urlSyncTimer);
+  window.clearTimeout(querySyncTimer);
+  window.location.reload();
 });
 
 document.addEventListener("DOMContentLoaded", () => {
