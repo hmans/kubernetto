@@ -5,10 +5,10 @@ package server
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"html"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,6 +19,7 @@ import (
 
 type PageState struct {
 	Cluster      *kube.Cluster
+	Clusters     []*kube.Cluster
 	Resources    []kube.ResourceDef
 	Signals      Signals
 	Summary      kube.Summary
@@ -96,21 +97,24 @@ func hasClass(classes, class string) bool {
 
 func appSignalAttrs(state PageState) templ.Attributes {
 	return templ.Attributes{
-		"data-signals:resource":          jsString(state.Signals.Resource),
-		"data-signals:namespace":         jsString(state.Signals.Namespace),
-		"data-signals:query":             jsString(state.Signals.Query),
-		"data-signals:selectedName":      jsString(state.Signals.SelectedName),
-		"data-signals:selectedNamespace": jsString(state.Signals.SelectedNamespace),
-		"data-signals:detailMode":        jsString(state.Signals.DetailMode),
+		"data-signals:context":           signalLiteral(state.Signals.Context),
+		"data-signals:resource":          signalLiteral(state.Signals.Resource),
+		"data-signals:namespace":         signalLiteral(state.Signals.Namespace),
+		"data-signals:query":             signalLiteral(state.Signals.Query),
+		"data-signals:sortColumn":        signalLiteral(state.Signals.SortColumn),
+		"data-signals:sortOrder":         signalLiteral(state.Signals.SortOrder),
+		"data-signals:selectedName":      signalLiteral(state.Signals.SelectedName),
+		"data-signals:selectedNamespace": signalLiteral(state.Signals.SelectedNamespace),
+		"data-signals:detailMode":        signalLiteral(state.Signals.DetailMode),
 		"data-signals:loading":           "false",
-		"data-init":                      "@get('/events')",
+		"data-on-interval__duration.5s":  "@get('/ui/summary')",
 	}
 }
 
 func resourceButtonAttrs(def kube.ResourceDef) templ.Attributes {
 	return templ.Attributes{
 		"data-indicator:loading": true,
-		"data-on:click":          "$resource = " + jsString(string(def.Kind)) + "; $selectedName = ''; $selectedNamespace = ''; $detailMode = 'overview'; @get('/ui/table')",
+		"data-on:click":          "$resource = " + signalLiteral(string(def.Kind)) + "; $sortColumn = ''; $sortOrder = ''; $selectedName = ''; $selectedNamespace = ''; $detailMode = 'overview'; @get('/ui/table')",
 	}
 }
 
@@ -119,6 +123,14 @@ func namespaceSelectAttrs() templ.Attributes {
 		"data-indicator:loading": true,
 		"data-bind:namespace":    true,
 		"data-on:change":         "$selectedName = ''; $selectedNamespace = ''; $detailMode = 'overview'; @get('/ui/table')",
+	}
+}
+
+func contextSelectAttrs() templ.Attributes {
+	return templ.Attributes{
+		"data-indicator:loading": true,
+		"data-bind:context":      true,
+		"data-on:change":         "$namespace = ''; $sortColumn = ''; $sortOrder = ''; $selectedName = ''; $selectedNamespace = ''; $detailMode = 'overview'; @get('/ui/refresh')",
 	}
 }
 
@@ -137,6 +149,49 @@ func refreshButtonAttrs() templ.Attributes {
 	}
 }
 
+func sortHeaderAttrs(column string) templ.Attributes {
+	columnLiteral := signalLiteral(column)
+	nextOrder := "$sortColumn == " + columnLiteral + " ? ($sortOrder == 'asc' ? 'desc' : ($sortOrder == 'desc' ? '' : 'asc')) : 'asc'"
+	return templ.Attributes{
+		"data-indicator:loading": true,
+		"data-on:click":          "$sortOrder = " + nextOrder + "; $sortColumn = $sortOrder == '' ? '' : " + columnLiteral + "; $selectedName = ''; $selectedNamespace = ''; $detailMode = 'overview'; @get('/ui/table')",
+	}
+}
+
+func sortAria(column, sortColumn, sortOrder string) string {
+	if column != sortColumn {
+		return "none"
+	}
+	switch sortOrder {
+	case "asc":
+		return "ascending"
+	case "desc":
+		return "descending"
+	default:
+		return "none"
+	}
+}
+
+func sortButtonClass(column, sortColumn string) string {
+	if column == sortColumn {
+		return "sort-heading active"
+	}
+	return "sort-heading"
+}
+
+func sortIndicator(column, sortColumn, sortOrder string) string {
+	if column != sortColumn {
+		return ""
+	}
+	if sortOrder == "asc" {
+		return "↑"
+	}
+	if sortOrder == "desc" {
+		return "↓"
+	}
+	return ""
+}
+
 func progressAttrs() templ.Attributes {
 	return templ.Attributes{
 		"data-class:active": "$loading",
@@ -150,8 +205,8 @@ func rowAttrs(row kube.Row, state PageState) templ.Attributes {
 		"aria-selected":          checkedBool(selectedRow(row, state)),
 		"data-selected":          checkedBool(selectedRow(row, state)),
 		"data-indicator:loading": true,
-		"data-on:click":          "$selectedName = " + jsString(row.Name) + "; $selectedNamespace = " + jsString(row.Namespace) + "; $detailMode = 'overview'; @get('/ui/selection')",
-		"data-on:keydown__enter": "$selectedName = " + jsString(row.Name) + "; $selectedNamespace = " + jsString(row.Namespace) + "; $detailMode = 'overview'; @get('/ui/selection')",
+		"data-on:click":          "$selectedName = " + signalLiteral(row.Name) + "; $selectedNamespace = " + signalLiteral(row.Namespace) + "; $detailMode = 'overview'; @get('/ui/selection')",
+		"data-on:keydown__enter": "$selectedName = " + signalLiteral(row.Name) + "; $selectedNamespace = " + signalLiteral(row.Namespace) + "; $detailMode = 'overview'; @get('/ui/selection')",
 	}
 }
 
@@ -169,7 +224,7 @@ func detailTabAttrs(mode string, state PageState) templ.Attributes {
 		"type":                   "button",
 		"aria-selected":          checkedBool(state.Signals.DetailMode == mode),
 		"data-indicator:loading": true,
-		"data-on:click":          "$detailMode = " + jsString(mode) + "; @get('/ui/detail')",
+		"data-on:click":          "$detailMode = " + signalLiteral(mode) + "; @get('/ui/detail')",
 	}
 }
 
@@ -184,10 +239,6 @@ func formatTimestamp(t time.Time) string {
 	return t.Format("2006-01-02 15:04:05")
 }
 
-func jsString(value string) string {
-	out, err := json.Marshal(value)
-	if err != nil {
-		return `""`
-	}
-	return string(out)
+func signalLiteral(value string) string {
+	return strconv.Quote(value)
 }

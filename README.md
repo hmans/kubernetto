@@ -10,7 +10,7 @@ go run ./cmd/kubernetto
 
 Then open <http://127.0.0.1:9832>.
 
-Kubernetto uses the active kubeconfig by default, falling back to in-cluster config when available. You can override either the listen address or kubeconfig path:
+Kubernetto loads every context from your kubeconfig, selecting the active context by default and falling back to in-cluster config when available. You can override either the listen address or kubeconfig path:
 
 ```sh
 go run ./cmd/kubernetto --addr 127.0.0.1:9833 --kubeconfig ~/.kube/config
@@ -39,6 +39,7 @@ go generate ./...
 ## Current Scope
 
 - Cluster summary with live Data-Star SSE refresh.
+- Context switching across all contexts in the loaded kubeconfig.
 - Resource tables for pods, deployments, statefulsets, daemonsets, services, ingresses, nodes, and namespaces.
 - Namespace filtering for namespaced resources.
 - Client-side signals with server-rendered table fragments.
