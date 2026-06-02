@@ -119,6 +119,61 @@ func TestResourceStoreReadsDoNotCallKubeAPI(t *testing.T) {
 	}
 }
 
+func TestResourceStoreTableSortsBySelectedColumn(t *testing.T) {
+	clientset := fake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "default"}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "prod"}},
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "prod"},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "api"}}},
+			Status: corev1.PodStatus{
+				Phase: corev1.PodRunning,
+				ContainerStatuses: []corev1.ContainerStatus{
+					{Name: "api", Ready: true},
+				},
+			},
+		},
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "cache", Namespace: "default"},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "cache"}}},
+			Status: corev1.PodStatus{
+				Phase: corev1.PodRunning,
+				ContainerStatuses: []corev1.ContainerStatus{
+					{Name: "cache", Ready: true},
+				},
+			},
+		},
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "worker", Namespace: "prod"},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "worker"}}},
+			Status: corev1.PodStatus{
+				Phase: corev1.PodRunning,
+				ContainerStatuses: []corev1.ContainerStatus{
+					{Name: "worker", Ready: true},
+				},
+			},
+		},
+	)
+
+	store := syncedTestStore(t, clientset)
+
+	table := store.TableWithSort(KindPods, "", "", "Name", "desc")
+	if table.SortColumn != "Name" || table.SortOrder != "desc" {
+		t.Fatalf("sort state = %q/%q, want Name/desc", table.SortColumn, table.SortOrder)
+	}
+	if got := rowNames(table.Rows); !equalStrings(got, []string{"worker", "cache", "api"}) {
+		t.Fatalf("rows sorted by name desc = %#v", got)
+	}
+
+	table = store.TableWithSort(KindPods, "", "", "Unknown", "desc")
+	if table.SortColumn != "" || table.SortOrder != "" {
+		t.Fatalf("invalid sort state = %q/%q, want empty", table.SortColumn, table.SortOrder)
+	}
+	if got := rowNames(table.Rows); !equalStrings(got, []string{"cache", "api", "worker"}) {
+		t.Fatalf("rows with invalid sort = %#v", got)
+	}
+}
+
 func syncedTestStore(t *testing.T, clientset *fake.Clientset) *ResourceStore {
 	t.Helper()
 
@@ -138,6 +193,14 @@ func syncedTestStore(t *testing.T, clientset *fake.Clientset) *ResourceStore {
 		t.Fatal("store did not sync")
 	}
 	return store
+}
+
+func rowNames(rows []Row) []string {
+	names := make([]string, 0, len(rows))
+	for _, row := range rows {
+		names = append(names, row.Name)
+	}
+	return names
 }
 
 func ptr[T any](value T) *T {

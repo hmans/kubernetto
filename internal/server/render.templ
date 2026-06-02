@@ -141,7 +141,16 @@ templ TableView(state PageState) {
 					<thead>
 						<tr>
 							for _, column := range state.Table.Columns {
-								<th scope="col">{ column }</th>
+								<th scope="col" aria-sort={ sortAria(column, state.Table.SortColumn, state.Table.SortOrder) }>
+									<button
+										type="button"
+										class={ sortButtonClass(column, state.Table.SortColumn) }
+										{ sortHeaderAttrs(column)... }
+									>
+										<span>{ column }</span>
+										<span class="sort-indicator" aria-hidden="true">{ sortIndicator(column, state.Table.SortColumn, state.Table.SortOrder) }</span>
+									</button>
+								</th>
 							}
 						</tr>
 					</thead>

@@ -192,6 +192,34 @@ button, input, select { font: inherit; }
 table { width: 100%; border-collapse: collapse; min-width: 760px; }
 th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
 th { color: var(--muted); font-size: 12px; background: #f9fbfc; font-weight: 680; }
+th .sort-heading {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  padding: 0;
+  font: inherit;
+  font-weight: inherit;
+}
+th .sort-heading:hover, th .sort-heading.active { color: var(--accent-2); }
+th .sort-heading:focus-visible {
+  outline: 2px solid rgba(13,148,136,.45);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+.sort-indicator {
+  display: inline-grid;
+  place-items: center;
+  width: 10px;
+  color: var(--accent);
+  font-size: 11px;
+  line-height: 1;
+}
 td { color: #25323a; }
 tr:hover td { background: #fbfcfd; }
 .primary { font-weight: 690; color: var(--text); }

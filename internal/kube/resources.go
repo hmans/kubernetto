@@ -62,6 +62,8 @@ type Table struct {
 	Rows       []Row
 	Namespace  string
 	Query      string
+	SortColumn string
+	SortOrder  string
 	Error      string
 	UpdatedAt  time.Time
 	Namespaced bool
@@ -138,6 +140,10 @@ func (c *Cluster) Namespaces(ctx context.Context) ([]string, error) {
 }
 
 func (c *Cluster) Table(ctx context.Context, kind ResourceKind, namespace, query string) Table {
+	return c.TableWithSort(ctx, kind, namespace, query, "", "")
+}
+
+func (c *Cluster) TableWithSort(ctx context.Context, kind ResourceKind, namespace, query, sortColumn, sortOrder string) Table {
 	def := resourceDef(kind)
 	table := Table{
 		Kind:       def.Kind,
@@ -260,9 +266,7 @@ func (c *Cluster) Table(ctx context.Context, kind ResourceKind, namespace, query
 		}
 	}
 
-	sort.SliceStable(table.Rows, func(i, j int) bool {
-		return strings.ToLower(table.Rows[i].Name) < strings.ToLower(table.Rows[j].Name)
-	})
+	sortTableRows(&table, sortColumn, sortOrder)
 
 	return table
 }
@@ -449,6 +453,78 @@ func matches(row Row, query string) bool {
 		}
 	}
 	return false
+}
+
+func sortTableRows(table *Table, sortColumn, sortOrder string) {
+	sortColumn, sortOrder = normalizeSort(table.Columns, sortColumn, sortOrder)
+	table.SortColumn = sortColumn
+	table.SortOrder = sortOrder
+
+	if sortColumn == "" || sortOrder == "" {
+		sortRows(table.Rows, table.Namespaced)
+		return
+	}
+
+	columnIndex := sortColumnIndex(table.Columns, sortColumn)
+	sort.SliceStable(table.Rows, func(i, j int) bool {
+		cmp := compareCellValues(rowCellValue(table.Rows[i], columnIndex), rowCellValue(table.Rows[j], columnIndex))
+		if cmp == 0 {
+			return compareDefaultRows(table.Rows[i], table.Rows[j], table.Namespaced) < 0
+		}
+		if sortOrder == "desc" {
+			return cmp > 0
+		}
+		return cmp < 0
+	})
+}
+
+func normalizeSort(columns []string, sortColumn, sortOrder string) (string, string) {
+	if sortOrder != "asc" && sortOrder != "desc" {
+		return "", ""
+	}
+	if sortColumnIndex(columns, sortColumn) == -1 {
+		return "", ""
+	}
+	return sortColumn, sortOrder
+}
+
+func sortColumnIndex(columns []string, sortColumn string) int {
+	for index, column := range columns {
+		if column == sortColumn {
+			return index
+		}
+	}
+	return -1
+}
+
+func sortRows(rows []Row, namespaced bool) {
+	sort.SliceStable(rows, func(i, j int) bool {
+		return compareDefaultRows(rows[i], rows[j], namespaced) < 0
+	})
+}
+
+func compareDefaultRows(left, right Row, namespaced bool) int {
+	leftKey := strings.ToLower(strings.Join(rowSortKey(left, namespaced), "/"))
+	rightKey := strings.ToLower(strings.Join(rowSortKey(right, namespaced), "/"))
+	return strings.Compare(leftKey, rightKey)
+}
+
+func rowSortKey(row Row, namespaced bool) []string {
+	if namespaced && len(row.Cells) > 1 {
+		return []string{row.Cells[1].Value, row.Name}
+	}
+	return []string{row.Name}
+}
+
+func rowCellValue(row Row, columnIndex int) string {
+	if columnIndex < 0 || columnIndex >= len(row.Cells) {
+		return ""
+	}
+	return row.Cells[columnIndex].Value
+}
+
+func compareCellValues(left, right string) int {
+	return strings.Compare(strings.ToLower(strings.TrimSpace(left)), strings.ToLower(strings.TrimSpace(right)))
 }
 
 func healthKey(ok bool) string {
