@@ -9,13 +9,13 @@ run = "mise watch --restart --stop-signal TERM --map-signal HUP:TERM app"
 [tasks.build]
 description = "Build Kubernetto"
 sources = [
-	"cmd/**/*.go",
-	"internal/**/*.go",
-	"internal/**/*.templ",
-	"internal/server/ui/assets/**",
+	"**/*.go",
+	"**/*.templ",
+	"internal/server/ui/assets/**/*",
 	"go.mod",
 	"go.sum",
-	"!internal/server/**/*_templ.go",
+	"mise.toml",
+	"!**/*_templ.go",
 ]
 outputs = [
 	"kubernetto",
@@ -29,13 +29,4 @@ go build -o ./kubernetto ./cmd/kubernetto
 [tasks.app]
 hide = true
 depends = "build"
-sources = [
-	"cmd/**/*.go",
-	"internal/**/*.go",
-	"internal/**/*.templ",
-	"internal/server/ui/assets/**",
-	"go.mod",
-	"go.sum",
-	"!internal/server/**/*_templ.go",
-]
 run = "exec ./kubernetto"
