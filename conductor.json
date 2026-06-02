@@ -1,0 +1,7 @@
+{
+  "scripts": {
+    "setup": "mise trust",
+    "run": "mise dev --port \"$CONDUCTOR_PORT\""
+  },
+  "runScriptMode": "concurrent"
+}
