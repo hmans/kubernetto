@@ -16,6 +16,12 @@ Kubernetto uses the active kubeconfig by default, falling back to in-cluster con
 go run ./cmd/kubernetto --addr 127.0.0.1:9833 --kubeconfig ~/.kube/config
 ```
 
+You can also set only the local listen port:
+
+```sh
+go run ./cmd/kubernetto --port 9833
+```
+
 ## Build
 
 ```sh

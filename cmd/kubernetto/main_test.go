@@ -1,0 +1,66 @@
+package main
+
+import "testing"
+
+func TestResolveListenAddr(t *testing.T) {
+	tests := []struct {
+		name    string
+		opts    serverOptions
+		addrSet bool
+		want    string
+		wantErr string
+	}{
+		{
+			name: "default addr",
+			opts: serverOptions{addr: "127.0.0.1:9832"},
+			want: "127.0.0.1:9832",
+		},
+		{
+			name: "custom addr",
+			opts: serverOptions{addr: "0.0.0.0:8080"},
+			want: "0.0.0.0:8080",
+		},
+		{
+			name: "port",
+			opts: serverOptions{addr: "127.0.0.1:9832", port: 19836},
+			want: "127.0.0.1:19836",
+		},
+		{
+			name:    "addr and port conflict",
+			opts:    serverOptions{addr: "127.0.0.1:8080", port: 19836},
+			addrSet: true,
+			wantErr: "use either --addr or --port, not both",
+		},
+		{
+			name:    "port below range",
+			opts:    serverOptions{addr: "127.0.0.1:9832", port: -1},
+			wantErr: "--port must be between 1 and 65535",
+		},
+		{
+			name:    "port above range",
+			opts:    serverOptions{addr: "127.0.0.1:9832", port: 65536},
+			wantErr: "--port must be between 1 and 65535",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveListenAddr(tt.opts, tt.addrSet)
+			if tt.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected error %q, got nil", tt.wantErr)
+				}
+				if err.Error() != tt.wantErr {
+					t.Fatalf("expected error %q, got %q", tt.wantErr, err.Error())
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("expected %q, got %q", tt.want, got)
+			}
+		})
+	}
+}
