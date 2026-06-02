@@ -66,14 +66,20 @@ templ Page(state PageState) {
 						</div>
 						<button class="icon-button" type="button" title="Refresh" { refreshButtonAttrs()... }>↻</button>
 					</section>
-					<div class="content-grid">
-						@TableView(state)
-						@DetailView(state)
-					</div>
+					@ContentView(state)
 				</main>
 			</div>
 		</body>
 	</html>
+}
+
+templ ContentView(state PageState) {
+	<div id="content-grid" class={ contentGridClass(state) }>
+		@TableView(state)
+		if hasDetail(state) {
+			@DetailView(state)
+		}
+	</div>
 }
 
 templ SummaryView(state PageState) {
@@ -190,13 +196,8 @@ templ TableView(state PageState) {
 }
 
 templ DetailView(state PageState) {
-	<aside id="detail-panel" class="detail-panel" aria-live="polite">
-		if state.Detail.Name == "" {
-			<div class="detail-empty">
-				<h2>Details</h2>
-				<p>Select a row to inspect labels, status, ownership, and resource-specific fields.</p>
-			</div>
-		} else {
+	if hasDetail(state) {
+		<aside id="detail-panel" class="detail-panel" aria-live="polite">
 			<div class="detail-head">
 				<div class="detail-title">
 					<span>{ state.Detail.Label }</span>
@@ -223,8 +224,8 @@ templ DetailView(state PageState) {
 					@DetailOverviewView(state)
 				}
 			}
-		}
-	</aside>
+		</aside>
+	}
 }
 
 templ DetailOverviewView(state PageState) {
