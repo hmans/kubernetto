@@ -356,7 +356,6 @@ tbody tr:focus-visible td {
 }
 tbody tr[data-selected="true"] td {
   background: var(--status-neutral-bg);
-  border-bottom-color: var(--accent);
 }
 tbody tr:hover .primary, tbody tr[data-selected="true"] .primary { color: var(--text-strong); }
 .primary { font-weight: 690; color: var(--text); }
