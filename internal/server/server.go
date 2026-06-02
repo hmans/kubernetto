@@ -70,6 +70,7 @@ func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", s.handleIndex)
 	mux.HandleFunc("GET /assets/app.css", s.handleStyles)
+	mux.HandleFunc("GET /assets/app.js", s.handleScript)
 	mux.HandleFunc("GET /ui/refresh", s.handleRefresh)
 	mux.HandleFunc("GET /ui/summary", s.handleSummary)
 	mux.HandleFunc("GET /ui/table", s.handleTable)
