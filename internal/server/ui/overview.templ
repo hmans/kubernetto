@@ -1,0 +1,93 @@
+package ui
+
+import (
+	"fmt"
+
+	"kubernetto/internal/kube"
+)
+
+templ OverviewView(state PageState) {
+	<section class="overview" aria-label="Cluster overview">
+		<div class="overview-head">
+			<div>
+				<h2>Cluster Overview</h2>
+				<div class="updated">{ fmt.Sprintf("updated %s", formatClock(state.Overview.UpdatedAt)) }</div>
+			</div>
+		</div>
+		if state.Overview.Error != "" {
+			<div class="notice danger">{ state.Overview.Error }</div>
+		} else {
+			<div class="overview-stats">
+				for _, metric := range state.Overview.Stats {
+					<button { overviewResourceLinkAttrs(metric.Kind)... }>
+						<div class="label">{ metric.Label }</div>
+						<div class="overview-value">{ metric.Value }</div>
+						if metric.Detail != "" {
+							<div class="updated">{ metric.Detail }</div>
+						}
+					</button>
+				}
+			</div>
+			if len(state.Overview.Identity) > 0 {
+				<section class="overview-panel">
+					<div class="overview-panel-head">
+						<h3>Cluster</h3>
+					</div>
+					<dl class="detail-list overview-identity">
+						for _, field := range state.Overview.Identity {
+							<div>
+								<dt>{ field.Name }</dt>
+								<dd>{ field.Value }</dd>
+							</div>
+						}
+					</dl>
+				</section>
+			}
+			<section class="overview-panel">
+				<div class="overview-panel-head">
+					<h3>Resources</h3>
+				</div>
+				<div class="resource-counts">
+					for _, metric := range state.Overview.Resources {
+						<button { overviewResourceLinkAttrs(metric.Kind)... }>
+							<span>{ metric.Label }</span>
+							<strong>{ metric.Value }</strong>
+						</button>
+					}
+				</div>
+			</section>
+			<section class="overview-panel">
+				<div class="overview-panel-head">
+					<h3>Recent Warnings</h3>
+					<button { overviewResourceLinkAttrs(kube.KindOverview)... }>Refresh</button>
+				</div>
+				if len(state.Overview.WarningEvents) == 0 {
+					<div class="empty">No recent warning events are cached.</div>
+				} else {
+					<div class="event-list overview-events">
+						for _, event := range state.Overview.WarningEvents {
+							<article class="event-item warning">
+								<div class="event-head">
+									<span>{ event.Reason }</span>
+									<span>{ event.Age }</span>
+								</div>
+								<p>{ event.Message }</p>
+								<div class="event-meta">
+									if event.InvolvedObject != "" {
+										<span>{ event.InvolvedObject }</span>
+									}
+									if event.Namespace != "" {
+										<span>{ event.Namespace }</span>
+									}
+									if event.Count > 1 {
+										<span>{ fmt.Sprintf("%d times", event.Count) }</span>
+									}
+								</div>
+							</article>
+						}
+					</div>
+				}
+			</section>
+		}
+	</section>
+}

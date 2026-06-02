@@ -41,11 +41,27 @@ func TestReadSignalsDefaults(t *testing.T) {
 
 	signals := readSignals(req)
 
-	if signals.Resource != "pods" {
-		t.Fatalf("resource = %q, want pods", signals.Resource)
+	if signals.Resource != "overview" {
+		t.Fatalf("resource = %q, want overview", signals.Resource)
 	}
 	if signals.DetailMode != "overview" {
 		t.Fatalf("detailMode = %q, want overview", signals.DetailMode)
+	}
+}
+
+func TestHandleIndexDefaultsToClusterOverview(t *testing.T) {
+	app := New(nil, context.Background(), nil)
+	req := httptest.NewRequest("GET", "/", nil)
+	res := httptest.NewRecorder()
+
+	app.handleIndex(res, req)
+
+	body := res.Body.String()
+	if !strings.Contains(body, `data-signals:resource="&#34;overview&#34;"`) {
+		t.Fatalf("index did not render overview resource signal")
+	}
+	if !strings.Contains(body, "Cluster Overview") {
+		t.Fatalf("index did not render cluster overview")
 	}
 }
 
@@ -67,7 +83,7 @@ func TestHandleIndexUsesQueryState(t *testing.T) {
 
 func TestHandleIndexRendersTableAutoRefresh(t *testing.T) {
 	app := New(nil, context.Background(), nil)
-	req := httptest.NewRequest("GET", "/", nil)
+	req := httptest.NewRequest("GET", "/?resource=pods", nil)
 	res := httptest.NewRecorder()
 
 	app.handleIndex(res, req)
@@ -78,6 +94,19 @@ func TestHandleIndexRendersTableAutoRefresh(t *testing.T) {
 	}
 	if !strings.Contains(body, `data-on-interval__duration.5s="@get(&#39;/ui/table&#39;)"`) {
 		t.Fatalf("index did not render table auto-refresh interval")
+	}
+}
+
+func TestHandleIndexDoesNotAutoRefreshOverviewAsTable(t *testing.T) {
+	app := New(nil, context.Background(), nil)
+	req := httptest.NewRequest("GET", "/", nil)
+	res := httptest.NewRecorder()
+
+	app.handleIndex(res, req)
+
+	body := res.Body.String()
+	if strings.Contains(body, `data-on-interval__duration.5s="@get(&#39;/ui/table&#39;)"`) {
+		t.Fatalf("index rendered table auto-refresh interval on overview")
 	}
 }
 
