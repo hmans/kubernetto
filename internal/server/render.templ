@@ -13,6 +13,7 @@ templ Page(state PageState) {
 			<meta charset="utf-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
 			<title>Kubernetto</title>
+			<script src="/assets/app.js"></script>
 			<link rel="stylesheet" href="/assets/app.css"/>
 			<script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0/bundles/datastar.js"></script>
 		</head>
@@ -47,7 +48,14 @@ templ Page(state PageState) {
 				<main class="main">
 					<div class="topbar">
 						<h1>Cluster Dashboard</h1>
-						<div class="updated">Live summary every 5s</div>
+						<div class="topbar-actions">
+							<div class="updated">Live summary every 5s</div>
+							<div class="theme-switcher" role="group" aria-label="Theme">
+								<button type="button" data-theme-option="auto" aria-pressed="true">Auto</button>
+								<button type="button" data-theme-option="light" aria-pressed="false">Light</button>
+								<button type="button" data-theme-option="dark" aria-pressed="false">Dark</button>
+							</div>
+						</div>
 					</div>
 					@SummaryView(state)
 					<section class="toolbar" aria-label="Table controls">
@@ -71,7 +79,7 @@ templ Page(state PageState) {
 templ SummaryView(state PageState) {
 	<section id="summary" class="summary" aria-label="Cluster summary">
 		if state.Summary.Error != "" {
-			<div class="notice danger" style="grid-column: 1 / -1">{ state.Summary.Error }</div>
+			<div class="notice danger summary-notice">{ state.Summary.Error }</div>
 		}
 		<div class="metric">
 			<div class="label">Version</div>
