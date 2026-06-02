@@ -1,5 +1,7 @@
 [tools]
 go = "latest"
+node = "latest"
+pnpm = "latest"
 watchexec = "latest"
 
 [tasks.dev]
@@ -12,6 +14,9 @@ sources = [
 	"**/*.go",
 	"**/*.templ",
 	"internal/server/ui/assets/**/*",
+	"package.json",
+	"pnpm-lock.yaml",
+	"scripts/**/*",
 	"go.mod",
 	"go.sum",
 	"mise.toml",
@@ -22,6 +27,7 @@ outputs = [
 	"internal/server/ui/*_templ.go",
 ]
 run = """
+pnpm build:assets
 go generate ./...
 go build -o ./kubernetto ./cmd/kubernetto
 """
