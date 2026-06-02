@@ -3,11 +3,15 @@ go = "latest"
 
 [tasks.dev]
 description = "Run Kubernetto and restart when source files change"
-run = "mise watch app --restart --ignore 'internal/server/*_templ.go'"
+run = "mise watch app --restart --stop-signal TERM --map-signal HUP:TERM --ignore 'internal/server/*_templ.go'"
 
 [tasks.app]
 hide = true
-run = "go generate ./... && go run ./cmd/kubernetto"
+run = """
+go generate ./...
+go build -o ./kubernetto ./cmd/kubernetto
+exec ./kubernetto "$@"
+"""
 sources = [
   "**/*.go",
   "**/*.templ",
