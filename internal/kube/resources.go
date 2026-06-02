@@ -17,6 +17,7 @@ import (
 type ResourceKind string
 
 const (
+	KindOverview    ResourceKind = "overview"
 	KindPods        ResourceKind = "pods"
 	KindDeployments ResourceKind = "deployments"
 	KindStatefulSet ResourceKind = "statefulsets"
@@ -34,6 +35,7 @@ type ResourceDef struct {
 }
 
 var ResourceDefs = []ResourceDef{
+	{Kind: KindOverview, Label: "Overview", Scope: "cluster"},
 	{Kind: KindPods, Label: "Pods", Scope: "namespaced"},
 	{Kind: KindDeployments, Label: "Deployments", Scope: "namespaced"},
 	{Kind: KindStatefulSet, Label: "StatefulSets", Scope: "namespaced"},
@@ -54,6 +56,34 @@ type Summary struct {
 	Deployments   int
 	Error         string
 	UpdatedAt     time.Time
+}
+
+type ClusterOverview struct {
+	Error         string
+	UpdatedAt     time.Time
+	Identity      []DetailField
+	Resources     []OverviewMetric
+	Stats         []OverviewMetric
+	WarningEvents []OverviewEvent
+}
+
+type OverviewMetric struct {
+	Label     string
+	Value     string
+	Detail    string
+	StatusKey string
+	Kind      ResourceKind
+}
+
+type OverviewEvent struct {
+	Type           string
+	Reason         string
+	Message        string
+	Namespace      string
+	InvolvedObject string
+	Count          int32
+	Age            string
+	LastSeen       time.Time
 }
 
 type Table struct {
@@ -128,7 +158,7 @@ func NormalizeKind(kind string) ResourceKind {
 			return def.Kind
 		}
 	}
-	return KindPods
+	return KindOverview
 }
 
 func (c *Cluster) Summary(ctx context.Context) Summary {

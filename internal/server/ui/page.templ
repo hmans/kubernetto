@@ -52,14 +52,16 @@ templ Page(state PageState) {
 						</div>
 					</div>
 					@SummaryView(state)
-					<section class="toolbar" aria-label="Table controls">
-						@NamespacePickerView(state)
-						<div class="field">
-							<label for="query">Search</label>
-							<input id="query" type="search" value={ state.Signals.Query } placeholder="Filter visible fields" { searchInputAttrs()... }/>
-						</div>
-						<button class="icon-button" type="button" title="Refresh" { refreshButtonAttrs()... }>↻</button>
-					</section>
+					if !isOverview(state) {
+						<section class="toolbar" aria-label="Table controls">
+							@NamespacePickerView(state)
+							<div class="field">
+								<label for="query">Search</label>
+								<input id="query" type="search" value={ state.Signals.Query } placeholder="Filter visible fields" { searchInputAttrs()... }/>
+							</div>
+							<button class="icon-button" type="button" title="Refresh" { refreshButtonAttrs()... }>↻</button>
+						</section>
+					}
 					@ContentView(state)
 				</main>
 			</div>
@@ -68,10 +70,14 @@ templ Page(state PageState) {
 }
 
 templ ContentView(state PageState) {
-	<div id="content-grid" class={ contentGridClass(state) }>
-		@TableView(state)
-		if hasDetail(state) {
-			@DetailView(state)
+	<div id="content-grid" class={ contentGridClass(state) } { tableAutoRefreshAttrs(state)... }>
+		if isOverview(state) {
+			@OverviewView(state)
+		} else {
+			@TableView(state)
+			if hasDetail(state) {
+				@DetailView(state)
+			}
 		}
 	</div>
 }

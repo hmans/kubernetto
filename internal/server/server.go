@@ -141,8 +141,17 @@ func (s *Server) state(signals ui.Signals) ui.PageState {
 	if def.Scope == "cluster" {
 		selectedNamespace = ""
 	}
+	if kind == kube.KindOverview {
+		namespace = ""
+		selectedNamespace = ""
+		signals.SelectedName = ""
+		signals.SelectedNamespace = ""
+		signals.SortColumn = ""
+		signals.SortOrder = ""
+	}
 
 	summary := kube.Summary{UpdatedAt: time.Now(), Error: "No Kubernetes client is configured."}
+	overview := kube.ClusterOverview{UpdatedAt: time.Now(), Error: "No Kubernetes client is configured."}
 	table := kube.Table{Kind: kind, Label: def.Label, Namespace: namespace, Query: signals.Query, SortColumn: signals.SortColumn, SortOrder: signals.SortOrder, UpdatedAt: time.Now(), Namespaced: def.Scope == "namespaced"}
 	detail := kube.ResourceDetail{Kind: kind, Label: def.Label, Name: signals.SelectedName, Namespace: selectedNamespace}
 	namespaces := []string{}
@@ -150,8 +159,11 @@ func (s *Server) state(signals ui.Signals) ui.PageState {
 
 	if session != nil && session.store != nil {
 		summary = session.store.Summary()
-		table = session.store.TableWithSort(kind, namespace, signals.Query, signals.SortColumn, signals.SortOrder)
-		detail = session.store.Detail(kind, selectedNamespace, signals.SelectedName)
+		overview = session.store.Overview()
+		if kind != kube.KindOverview {
+			table = session.store.TableWithSort(kind, namespace, signals.Query, signals.SortColumn, signals.SortOrder)
+			detail = session.store.Detail(kind, selectedNamespace, signals.SelectedName)
+		}
 		var err error
 		namespaces, err = session.store.Namespaces()
 		if err != nil {
@@ -165,6 +177,7 @@ func (s *Server) state(signals ui.Signals) ui.PageState {
 		Resources:    kube.ResourceDefs,
 		Signals:      ui.Signals{Context: contextName, Resource: string(kind), Namespace: namespace, Query: signals.Query, SortColumn: table.SortColumn, SortOrder: table.SortOrder, SelectedName: signals.SelectedName, SelectedNamespace: selectedNamespace, DetailMode: detailMode},
 		Summary:      summary,
+		Overview:     overview,
 		Table:        table,
 		Detail:       detail,
 		Namespaces:   namespaces,
@@ -173,7 +186,7 @@ func (s *Server) state(signals ui.Signals) ui.PageState {
 }
 
 func readSignals(r *http.Request) ui.Signals {
-	signals := ui.Signals{Resource: string(kube.KindPods)}
+	signals := ui.Signals{Resource: string(kube.KindOverview)}
 	if err := datastar.ReadSignals(r, &signals); err != nil && !errors.Is(err, http.ErrNoCookie) {
 		// Datastar omits signals on plain browser requests. Query parameters keep
 		// endpoints easy to hit directly while the UI sends reactive signals.
@@ -207,7 +220,7 @@ func readSignals(r *http.Request) ui.Signals {
 		signals.DetailMode = detailMode
 	}
 	if signals.Resource == "" {
-		signals.Resource = string(kube.KindPods)
+		signals.Resource = string(kube.KindOverview)
 	}
 	signals.DetailMode = normalizeDetailMode(signals.DetailMode)
 	return signals
