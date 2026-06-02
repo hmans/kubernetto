@@ -81,6 +81,35 @@ func TestHandleIndexUsesQueryState(t *testing.T) {
 	}
 }
 
+func TestHandleIndexRendersTableAutoRefresh(t *testing.T) {
+	app := New(nil, context.Background(), nil)
+	req := httptest.NewRequest("GET", "/?resource=pods", nil)
+	res := httptest.NewRecorder()
+
+	app.handleIndex(res, req)
+
+	body := res.Body.String()
+	if !strings.Contains(body, `id="content-grid"`) {
+		t.Fatalf("index did not render content grid")
+	}
+	if !strings.Contains(body, `data-on-interval__duration.5s="@get(&#39;/ui/table&#39;)"`) {
+		t.Fatalf("index did not render table auto-refresh interval")
+	}
+}
+
+func TestHandleIndexDoesNotAutoRefreshOverviewAsTable(t *testing.T) {
+	app := New(nil, context.Background(), nil)
+	req := httptest.NewRequest("GET", "/", nil)
+	res := httptest.NewRecorder()
+
+	app.handleIndex(res, req)
+
+	body := res.Body.String()
+	if strings.Contains(body, `data-on-interval__duration.5s="@get(&#39;/ui/table&#39;)"`) {
+		t.Fatalf("index rendered table auto-refresh interval on overview")
+	}
+}
+
 func TestAssetEndpoints(t *testing.T) {
 	app := New(nil, context.Background(), nil)
 	tests := []struct {

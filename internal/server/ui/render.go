@@ -119,6 +119,15 @@ func appSignalAttrs(state PageState) templ.Attributes {
 	}
 }
 
+func tableAutoRefreshAttrs(state PageState) templ.Attributes {
+	if isOverview(state) {
+		return templ.Attributes{}
+	}
+	return templ.Attributes{
+		"data-on-interval__duration.5s": "@get('/ui/table')",
+	}
+}
+
 func resourceButtonAttrs(def kube.ResourceDef) templ.Attributes {
 	return templ.Attributes{
 		"data-indicator:loading": true,

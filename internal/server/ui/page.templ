@@ -70,7 +70,7 @@ templ Page(state PageState) {
 }
 
 templ ContentView(state PageState) {
-	<div id="content-grid" class={ contentGridClass(state) }>
+	<div id="content-grid" class={ contentGridClass(state) } { tableAutoRefreshAttrs(state)... }>
 		if isOverview(state) {
 			@OverviewView(state)
 		} else {
