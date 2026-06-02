@@ -163,13 +163,21 @@ func overviewStatLinkAttrs(metric kube.OverviewMetric) templ.Attributes {
 }
 
 func metricPieStyle(percent float64) string {
+	return fmt.Sprintf("--value: %.1f;", boundedPercent(percent))
+}
+
+func metricPieDasharray(percent float64) string {
+	return fmt.Sprintf("%.1f 100", boundedPercent(percent))
+}
+
+func boundedPercent(percent float64) float64 {
 	if percent < 0 {
-		percent = 0
+		return 0
 	}
 	if percent > 100 {
-		percent = 100
+		return 100
 	}
-	return fmt.Sprintf("--value: %.1f%%;", percent)
+	return percent
 }
 
 func metricPieLabel(percent float64) string {

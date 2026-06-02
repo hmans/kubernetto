@@ -362,7 +362,7 @@ button, input, select { font: inherit; }
   overflow-wrap: anywhere;
 }
 .metric-pie {
-  --value: 0%;
+  --value: 0;
   --metric-color: var(--accent);
   width: 86px;
   height: 86px;
@@ -372,8 +372,26 @@ button, input, select { font: inherit; }
   flex: 0 0 auto;
   border-radius: 50%;
   border: 1px solid var(--line);
-  background: conic-gradient(var(--metric-color) 0 var(--value), var(--panel-2) var(--value) 100%);
+  color: var(--metric-color);
+  background: var(--panel-2);
   box-shadow: inset 0 0 0 1px rgba(255,255,255,.04);
+  overflow: hidden;
+}
+.metric-pie svg {
+  position: absolute;
+  inset: -1px;
+  width: calc(100% + 2px);
+  height: calc(100% + 2px);
+  transform: rotate(-90deg);
+}
+.metric-pie-bg {
+  fill: var(--panel-2);
+}
+.metric-pie-fill {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 20;
+  stroke-linecap: butt;
 }
 .metric-pie::before {
   content: "";
