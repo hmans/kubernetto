@@ -10,7 +10,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"sigs.k8s.io/yaml"
 )
 
@@ -305,9 +304,8 @@ func (s *ResourceStore) withEvents(detail ResourceDetail) ResourceDetail {
 }
 
 func (s *ResourceStore) matchingEvents(detail ResourceDetail) []ResourceEvent {
-	items, _ := s.events.List(labels.Everything())
 	events := make([]ResourceEvent, 0)
-	for _, event := range items {
+	for _, event := range s.listEvents() {
 		ref := event.InvolvedObject
 		if !eventMatchesDetail(ref, detail) {
 			continue

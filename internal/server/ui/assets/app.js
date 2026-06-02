@@ -13,7 +13,7 @@ const urlStateKeys = [
 ];
 const defaultUrlState = {
   context: "",
-  resource: "pods",
+  resource: "overview",
   namespace: "",
   query: "",
   sortColumn: "",
