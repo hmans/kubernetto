@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 
 type PageState struct {
 	Cluster      *kube.Cluster
+	Clusters     []*kube.Cluster
 	Resources    []kube.ResourceDef
 	Signals      Signals
 	Summary      kube.Summary
@@ -83,11 +85,12 @@ func hasClass(classes, class string) bool {
 
 func appSignalAttrs(state PageState) templ.Attributes {
 	return templ.Attributes{
-		"data-signals:resource":  "'" + state.Signals.Resource + "'",
-		"data-signals:namespace": "'" + state.Signals.Namespace + "'",
-		"data-signals:query":     "'" + state.Signals.Query + "'",
-		"data-signals:loading":   "false",
-		"data-init":              "@get('/events')",
+		"data-signals:context":          signalLiteral(state.Signals.Context),
+		"data-signals:resource":         signalLiteral(state.Signals.Resource),
+		"data-signals:namespace":        signalLiteral(state.Signals.Namespace),
+		"data-signals:query":            signalLiteral(state.Signals.Query),
+		"data-signals:loading":          "false",
+		"data-on-interval__duration.5s": "@get('/ui/summary')",
 	}
 }
 
@@ -103,6 +106,14 @@ func namespaceSelectAttrs() templ.Attributes {
 		"data-indicator:loading": true,
 		"data-bind:namespace":    true,
 		"data-on:change":         "@get('/ui/table')",
+	}
+}
+
+func contextSelectAttrs() templ.Attributes {
+	return templ.Attributes{
+		"data-indicator:loading": true,
+		"data-bind:context":      true,
+		"data-on:change":         "$namespace = ''; @get('/ui/refresh')",
 	}
 }
 
@@ -125,4 +136,8 @@ func progressAttrs() templ.Attributes {
 	return templ.Attributes{
 		"data-class:active": "$loading",
 	}
+}
+
+func signalLiteral(value string) string {
+	return strconv.Quote(value)
 }
