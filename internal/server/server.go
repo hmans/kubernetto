@@ -98,8 +98,7 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	sse.PatchElements(renderFragment(resourceNav(state)))
 	sse.PatchElements(renderFragment(summaryView(state)))
 	sse.PatchElements(renderFragment(namespacePicker(state)))
-	sse.PatchElements(renderFragment(tableView(state)))
-	sse.PatchElements(renderFragment(detailView(state)))
+	sse.PatchElements(renderFragment(contentView(state)))
 }
 
 func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
@@ -115,16 +114,14 @@ func (s *Server) handleTable(w http.ResponseWriter, r *http.Request) {
 	sse := datastar.NewSSE(w, r)
 	sse.PatchElements(renderFragment(resourceNav(state)))
 	sse.PatchElements(renderFragment(namespacePicker(state)))
-	sse.PatchElements(renderFragment(tableView(state)))
-	sse.PatchElements(renderFragment(detailView(state)))
+	sse.PatchElements(renderFragment(contentView(state)))
 }
 
 func (s *Server) handleSelection(w http.ResponseWriter, r *http.Request) {
 	signals := readSignals(r)
 	state := s.state(signals)
 	sse := datastar.NewSSE(w, r)
-	sse.PatchElements(renderFragment(tableView(state)))
-	sse.PatchElements(renderFragment(detailView(state)))
+	sse.PatchElements(renderFragment(contentView(state)))
 }
 
 func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {

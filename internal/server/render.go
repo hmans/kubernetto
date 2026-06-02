@@ -45,6 +45,10 @@ func tableView(state PageState) templ.Component {
 	return TableView(state)
 }
 
+func contentView(state PageState) templ.Component {
+	return ContentView(state)
+}
+
 func detailView(state PageState) templ.Component {
 	return DetailView(state)
 }
@@ -93,6 +97,17 @@ func hasClass(classes, class string) bool {
 		}
 	}
 	return false
+}
+
+func hasDetail(state PageState) bool {
+	return state.Detail.Name != ""
+}
+
+func contentGridClass(state PageState) string {
+	if hasDetail(state) {
+		return "content-grid has-detail"
+	}
+	return "content-grid"
 }
 
 func appSignalAttrs(state PageState) templ.Attributes {
