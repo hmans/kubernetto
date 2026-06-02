@@ -37,3 +37,8 @@ sources = [
 	"!internal/server/*_templ.go",
 ]
 run = "exec ./kubernetto"
+sources = [
+  "**/*.go",
+  "**/*.templ",
+  "internal/server/ui/assets/**",
+]

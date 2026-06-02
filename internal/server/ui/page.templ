@@ -1,0 +1,91 @@
+package ui
+
+templ Page(state PageState) {
+	<!doctype html>
+	<html lang="en">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>Kubernetto</title>
+			<script src="/assets/app.js"></script>
+			<link rel="stylesheet" href="/assets/app.css"/>
+			<script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0/bundles/datastar.js"></script>
+		</head>
+		<body>
+			<div id="page-progress" class="page-progress" aria-hidden="true" { progressAttrs()... }></div>
+			<div class="app" { appSignalAttrs(state)... }>
+				<aside class="side">
+					<div class="brand">
+						<div class="brand-mark">K</div>
+						<div>Kubernetto</div>
+					</div>
+					<div class="context">
+						if state.Cluster != nil {
+							<label for="context">Context</label>
+							<select id="context" { contextSelectAttrs()... }>
+								for _, cluster := range state.Clusters {
+									<option value={ cluster.ContextName } selected?={ state.Signals.Context == cluster.ContextName }>{ cluster.ContextName }</option>
+								}
+							</select>
+							if state.Cluster.ClusterName != "" {
+								<span>{ state.Cluster.ClusterName }</span>
+							}
+							<span>{ state.Cluster.ConfigSource }</span>
+						} else {
+							<span>Context</span>
+							<strong>unconfigured</strong>
+							<span>kubeconfig unavailable</span>
+						}
+					</div>
+					@ResourceNavView(state)
+				</aside>
+				<main class="main">
+					<div class="topbar">
+						<h1>Cluster Dashboard</h1>
+						<div class="topbar-actions">
+							<div class="updated">Live summary every 5s</div>
+							<div class="theme-switcher" role="group" aria-label="Theme">
+								<button type="button" data-theme-option="auto" aria-pressed="true">Auto</button>
+								<button type="button" data-theme-option="light" aria-pressed="false">Light</button>
+								<button type="button" data-theme-option="dark" aria-pressed="false">Dark</button>
+							</div>
+						</div>
+					</div>
+					@SummaryView(state)
+					<section class="toolbar" aria-label="Table controls">
+						@NamespacePickerView(state)
+						<div class="field">
+							<label for="query">Search</label>
+							<input id="query" type="search" value={ state.Signals.Query } placeholder="Filter visible fields" { searchInputAttrs()... }/>
+						</div>
+						<button class="icon-button" type="button" title="Refresh" { refreshButtonAttrs()... }>↻</button>
+					</section>
+					@ContentView(state)
+				</main>
+			</div>
+		</body>
+	</html>
+}
+
+templ ContentView(state PageState) {
+	<div id="content-grid" class={ contentGridClass(state) }>
+		@TableView(state)
+		if hasDetail(state) {
+			@DetailView(state)
+		}
+	</div>
+}
+
+templ ResourceNavView(state PageState) {
+	<nav id="resource-nav" class="nav" aria-label="Resources">
+		for _, resource := range state.Resources {
+			<button
+				type="button"
+				aria-pressed={ checked(state.Signals.Resource, string(resource.Kind)) }
+				{ resourceButtonAttrs(resource)... }
+			>
+				<span>{ resource.Label }</span>
+			</button>
+		}
+	</nav>
+}

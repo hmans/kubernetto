@@ -11,6 +11,7 @@ import (
 	"github.com/starfederation/datastar-go/datastar"
 
 	"kubernetto/internal/kube"
+	"kubernetto/internal/server/ui"
 )
 
 type Server struct {
@@ -26,18 +27,6 @@ type clusterSession struct {
 	cluster           *kube.Cluster
 	store             *kube.ResourceStore
 	initialSyncWaited bool
-}
-
-type Signals struct {
-	Context           string `json:"context"`
-	Resource          string `json:"resource"`
-	Namespace         string `json:"namespace"`
-	Query             string `json:"query"`
-	SortColumn        string `json:"sortColumn"`
-	SortOrder         string `json:"sortOrder"`
-	SelectedName      string `json:"selectedName"`
-	SelectedNamespace string `json:"selectedNamespace"`
-	DetailMode        string `json:"detailMode"`
 }
 
 func New(clusters []*kube.Cluster, ctx context.Context, logger *slog.Logger) *Server {
@@ -72,8 +61,8 @@ func New(clusters []*kube.Cluster, ctx context.Context, logger *slog.Logger) *Se
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", s.handleIndex)
-	mux.HandleFunc("GET /assets/app.css", s.handleStyles)
-	mux.HandleFunc("GET /assets/app.js", s.handleScript)
+	mux.HandleFunc("GET /assets/app.css", ui.HandleStyles)
+	mux.HandleFunc("GET /assets/app.js", ui.HandleScript)
 	mux.HandleFunc("GET /ui/refresh", s.handleRefresh)
 	mux.HandleFunc("GET /ui/summary", s.handleSummary)
 	mux.HandleFunc("GET /ui/table", s.handleTable)
@@ -86,7 +75,7 @@ func (s *Server) Routes() http.Handler {
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	state := s.state(readSignals(r))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := renderPage(w, state); err != nil {
+	if err := ui.RenderPage(w, state); err != nil {
 		s.logger.Error("render index", "error", err)
 	}
 }
@@ -95,50 +84,47 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	signals := readSignals(r)
 	state := s.state(signals)
 	sse := datastar.NewSSE(w, r)
-	sse.PatchElements(renderFragment(resourceNav(state)))
-	sse.PatchElements(renderFragment(summaryView(state)))
-	sse.PatchElements(renderFragment(namespacePicker(state)))
-	sse.PatchElements(renderFragment(tableView(state)))
-	sse.PatchElements(renderFragment(detailView(state)))
+	sse.PatchElements(ui.RenderFragment(ui.ResourceNavView(state)))
+	sse.PatchElements(ui.RenderFragment(ui.SummaryView(state)))
+	sse.PatchElements(ui.RenderFragment(ui.NamespacePickerView(state)))
+	sse.PatchElements(ui.RenderFragment(ui.ContentView(state)))
 }
 
 func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 	signals := readSignals(r)
 	state := s.state(signals)
 	sse := datastar.NewSSE(w, r)
-	sse.PatchElements(renderFragment(summaryView(state)))
+	sse.PatchElements(ui.RenderFragment(ui.SummaryView(state)))
 }
 
 func (s *Server) handleTable(w http.ResponseWriter, r *http.Request) {
 	signals := readSignals(r)
 	state := s.state(signals)
 	sse := datastar.NewSSE(w, r)
-	sse.PatchElements(renderFragment(resourceNav(state)))
-	sse.PatchElements(renderFragment(namespacePicker(state)))
-	sse.PatchElements(renderFragment(tableView(state)))
-	sse.PatchElements(renderFragment(detailView(state)))
+	sse.PatchElements(ui.RenderFragment(ui.ResourceNavView(state)))
+	sse.PatchElements(ui.RenderFragment(ui.NamespacePickerView(state)))
+	sse.PatchElements(ui.RenderFragment(ui.ContentView(state)))
 }
 
 func (s *Server) handleSelection(w http.ResponseWriter, r *http.Request) {
 	signals := readSignals(r)
 	state := s.state(signals)
 	sse := datastar.NewSSE(w, r)
-	sse.PatchElements(renderFragment(tableView(state)))
-	sse.PatchElements(renderFragment(detailView(state)))
+	sse.PatchElements(ui.RenderFragment(ui.ContentView(state)))
 }
 
 func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
 	signals := readSignals(r)
 	state := s.state(signals)
 	sse := datastar.NewSSE(w, r)
-	sse.PatchElements(renderFragment(detailView(state)))
+	sse.PatchElements(ui.RenderFragment(ui.DetailView(state)))
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) state(signals Signals) PageState {
+func (s *Server) state(signals ui.Signals) ui.PageState {
 	kind := kube.NormalizeKind(signals.Resource)
 	namespace := signals.Namespace
 	detailMode := normalizeDetailMode(signals.DetailMode)
@@ -174,11 +160,11 @@ func (s *Server) state(signals Signals) PageState {
 		}
 	}
 
-	return PageState{
+	return ui.PageState{
 		Cluster:      sessionCluster(session),
 		Clusters:     s.clusterList(),
 		Resources:    kube.ResourceDefs,
-		Signals:      Signals{Context: contextName, Resource: string(kind), Namespace: namespace, Query: signals.Query, SortColumn: table.SortColumn, SortOrder: table.SortOrder, SelectedName: signals.SelectedName, SelectedNamespace: selectedNamespace, DetailMode: detailMode},
+		Signals:      ui.Signals{Context: contextName, Resource: string(kind), Namespace: namespace, Query: signals.Query, SortColumn: table.SortColumn, SortOrder: table.SortOrder, SelectedName: signals.SelectedName, SelectedNamespace: selectedNamespace, DetailMode: detailMode},
 		Summary:      summary,
 		Table:        table,
 		Detail:       detail,
@@ -187,8 +173,8 @@ func (s *Server) state(signals Signals) PageState {
 	}
 }
 
-func readSignals(r *http.Request) Signals {
-	signals := Signals{Resource: string(kube.KindPods)}
+func readSignals(r *http.Request) ui.Signals {
+	signals := ui.Signals{Resource: string(kube.KindPods)}
 	if err := datastar.ReadSignals(r, &signals); err != nil && !errors.Is(err, http.ErrNoCookie) {
 		// Datastar omits signals on plain browser requests. Query parameters keep
 		// endpoints easy to hit directly while the UI sends reactive signals.

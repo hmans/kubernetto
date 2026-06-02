@@ -101,6 +101,7 @@ func podDetail(pod corev1.Pod) ResourceDetail {
 	detail := detailBase(KindPods, "Pods", pod.ObjectMeta, status, healthKey(status == "Running" && ready == total))
 	detail.YAML = resourceYAML(yamlPod)
 	detail.Fields = detailFields(
+		"Problem", podProblem(pod),
 		"Namespace", pod.Namespace,
 		"Ready", fmt.Sprintf("%d/%d", ready, total),
 		"Restarts", fmt.Sprint(restarts),
@@ -459,33 +460,114 @@ func containerFields(pod corev1.Pod) []DetailField {
 	fields := make([]DetailField, 0, len(pod.Spec.Containers))
 	for _, container := range pod.Spec.Containers {
 		status := statuses[container.Name]
-		state := "waiting"
-		switch {
-		case status.Ready:
-			state = "ready"
-		case status.State.Running != nil:
-			state = "running"
-		case status.State.Terminated != nil:
-			state = "terminated"
-		}
 		fields = append(fields, DetailField{
 			Name:  container.Name,
-			Value: fmt.Sprintf("%s - %s - restarts %d", state, container.Image, status.RestartCount),
+			Value: containerStatusValue(container, status),
 		})
 	}
 	return fields
+}
+
+func containerStatusValue(container corev1.Container, status corev1.ContainerStatus) string {
+	parts := []string{containerStateText(status)}
+	if container.Image != "" {
+		parts = append(parts, container.Image)
+	}
+	parts = append(parts, fmt.Sprintf("restarts %d", status.RestartCount))
+	return strings.Join(parts, " - ")
+}
+
+func containerStateText(status corev1.ContainerStatus) string {
+	state := "waiting"
+	switch {
+	case status.State.Waiting != nil:
+		state = "waiting"
+		if text := reasonMessage(status.State.Waiting.Reason, status.State.Waiting.Message); text != "" {
+			state += ": " + text
+		}
+	case status.State.Terminated != nil:
+		state = "terminated"
+		if text := reasonMessage(status.State.Terminated.Reason, status.State.Terminated.Message); text != "" {
+			state += ": " + text
+		}
+	case status.Ready:
+		state = "ready"
+	case status.State.Running != nil:
+		state = "running"
+	}
+	if status.LastTerminationState.Terminated != nil {
+		last := status.LastTerminationState.Terminated
+		if text := reasonMessage(last.Reason, last.Message); text != "" {
+			state += "; last terminated: " + text
+		}
+	}
+	return state
 }
 
 func podConditionFields(conditions []corev1.PodCondition) []DetailField {
 	fields := make([]DetailField, 0, len(conditions))
 	for _, condition := range conditions {
 		value := string(condition.Status)
-		if condition.Reason != "" {
-			value += " - " + condition.Reason
+		if text := reasonMessage(condition.Reason, condition.Message); text != "" {
+			value += " - " + text
 		}
 		fields = append(fields, DetailField{Name: string(condition.Type), Value: value})
 	}
 	return fields
+}
+
+func podProblem(pod corev1.Pod) string {
+	if pod.DeletionTimestamp != nil {
+		return "Pod is terminating"
+	}
+	for _, status := range pod.Status.ContainerStatuses {
+		if status.State.Waiting != nil {
+			if text := reasonMessage(status.State.Waiting.Reason, status.State.Waiting.Message); text != "" {
+				return status.Name + " waiting: " + text
+			}
+			return status.Name + " waiting"
+		}
+	}
+	for _, status := range pod.Status.ContainerStatuses {
+		if status.State.Terminated != nil {
+			if text := reasonMessage(status.State.Terminated.Reason, status.State.Terminated.Message); text != "" {
+				return status.Name + " terminated: " + text
+			}
+			return status.Name + " terminated"
+		}
+	}
+	for _, status := range pod.Status.ContainerStatuses {
+		if status.LastTerminationState.Terminated != nil {
+			last := status.LastTerminationState.Terminated
+			if text := reasonMessage(last.Reason, last.Message); text != "" {
+				return status.Name + " recently terminated: " + text
+			}
+			return status.Name + " recently terminated"
+		}
+	}
+	for _, condition := range pod.Status.Conditions {
+		if condition.Status == corev1.ConditionFalse || condition.Status == corev1.ConditionUnknown {
+			if text := reasonMessage(condition.Reason, condition.Message); text != "" {
+				return string(condition.Type) + ": " + text
+			}
+			return string(condition.Type) + ": " + string(condition.Status)
+		}
+	}
+	if pod.Status.Phase != corev1.PodRunning && pod.Status.Phase != corev1.PodSucceeded && pod.Status.Phase != "" {
+		return "Pod phase is " + string(pod.Status.Phase)
+	}
+	return ""
+}
+
+func reasonMessage(reason, message string) string {
+	switch {
+	case reason != "" && message != "":
+		return reason + " - " + message
+	case reason != "":
+		return reason
+	default:
+		return message
+	}
 }
 
 func deploymentConditionFields(conditions []appsv1.DeploymentCondition) []DetailField {
