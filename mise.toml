@@ -16,3 +16,8 @@ go build -o ./kubernetto ./cmd/kubernetto
 hide = true
 depends = "build"
 run = "exec ./kubernetto"
+sources = [
+  "**/*.go",
+  "**/*.templ",
+  "internal/server/ui/assets/**",
+]

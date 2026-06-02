@@ -1,4 +1,4 @@
-package server
+package ui
 
 //go:generate go run github.com/a-h/templ/cmd/templ generate
 
@@ -29,35 +29,23 @@ type PageState struct {
 	NamespaceErr string
 }
 
-func summaryView(state PageState) templ.Component {
-	return SummaryView(state)
+type Signals struct {
+	Context           string `json:"context"`
+	Resource          string `json:"resource"`
+	Namespace         string `json:"namespace"`
+	Query             string `json:"query"`
+	SortColumn        string `json:"sortColumn"`
+	SortOrder         string `json:"sortOrder"`
+	SelectedName      string `json:"selectedName"`
+	SelectedNamespace string `json:"selectedNamespace"`
+	DetailMode        string `json:"detailMode"`
 }
 
-func namespacePicker(state PageState) templ.Component {
-	return NamespacePickerView(state)
-}
-
-func resourceNav(state PageState) templ.Component {
-	return ResourceNavView(state)
-}
-
-func tableView(state PageState) templ.Component {
-	return TableView(state)
-}
-
-func contentView(state PageState) templ.Component {
-	return ContentView(state)
-}
-
-func detailView(state PageState) templ.Component {
-	return DetailView(state)
-}
-
-func renderPage(w io.Writer, state PageState) error {
+func RenderPage(w io.Writer, state PageState) error {
 	return Page(state).Render(context.Background(), w)
 }
 
-func renderFragment(component templ.Component) string {
+func RenderFragment(component templ.Component) string {
 	var buf bytes.Buffer
 	if err := component.Render(context.Background(), &buf); err != nil {
 		return fmt.Sprintf(`<div class="notice danger">render error: %s</div>`, html.EscapeString(err.Error()))
