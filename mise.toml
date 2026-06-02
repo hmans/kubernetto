@@ -12,13 +12,14 @@ sources = [
 	"cmd/**/*.go",
 	"internal/**/*.go",
 	"internal/**/*.templ",
+	"internal/server/ui/assets/**",
 	"go.mod",
 	"go.sum",
-	"!internal/server/*_templ.go",
+	"!internal/server/**/*_templ.go",
 ]
 outputs = [
 	"kubernetto",
-	"internal/server/render_templ.go",
+	"internal/server/ui/*_templ.go",
 ]
 run = """
 go generate ./...
@@ -32,13 +33,9 @@ sources = [
 	"cmd/**/*.go",
 	"internal/**/*.go",
 	"internal/**/*.templ",
+	"internal/server/ui/assets/**",
 	"go.mod",
 	"go.sum",
-	"!internal/server/*_templ.go",
+	"!internal/server/**/*_templ.go",
 ]
 run = "exec ./kubernetto"
-sources = [
-  "**/*.go",
-  "**/*.templ",
-  "internal/server/ui/assets/**",
-]
