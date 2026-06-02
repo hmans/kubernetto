@@ -79,8 +79,9 @@ type Row struct {
 }
 
 type Cell struct {
-	Value string
-	Class string
+	Value     string
+	Class     string
+	SortValue *int64
 }
 
 type ResourceDetail struct {
@@ -342,17 +343,17 @@ func podRow(pod corev1.Pod, usage corev1.ResourceList) Row {
 		Cells: []Cell{
 			{Value: pod.Name, Class: "primary"},
 			{Value: pod.Namespace},
-			{Value: fmt.Sprintf("%d/%d", ready, total)},
+			cellWithOptionalSort(fmt.Sprintf("%d/%d", ready, total), ratioSortValue(int64(ready), int64(total))),
 			{Value: status, Class: "status " + healthKey(status == "Running" && ready == total)},
-			{Value: fmt.Sprint(restarts)},
-			{Value: resourceListValue(usage, corev1.ResourceCPU)},
-			{Value: containerResourceValue(pod.Spec.Containers, resourceRequests, corev1.ResourceCPU)},
-			{Value: containerResourceValue(pod.Spec.Containers, resourceLimits, corev1.ResourceCPU)},
-			{Value: resourceListValue(usage, corev1.ResourceMemory)},
-			{Value: containerResourceValue(pod.Spec.Containers, resourceRequests, corev1.ResourceMemory)},
-			{Value: containerResourceValue(pod.Spec.Containers, resourceLimits, corev1.ResourceMemory)},
+			cellWithSortValue(fmt.Sprint(restarts), int64(restarts)),
+			resourceListCell(usage, corev1.ResourceCPU),
+			containerResourceCell(pod.Spec.Containers, resourceRequests, corev1.ResourceCPU),
+			containerResourceCell(pod.Spec.Containers, resourceLimits, corev1.ResourceCPU),
+			resourceListCell(usage, corev1.ResourceMemory),
+			containerResourceCell(pod.Spec.Containers, resourceRequests, corev1.ResourceMemory),
+			containerResourceCell(pod.Spec.Containers, resourceLimits, corev1.ResourceMemory),
 			{Value: pod.Spec.NodeName},
-			{Value: age(pod.CreationTimestamp.Time)},
+			ageCell(pod.CreationTimestamp.Time),
 		},
 	}
 }
@@ -371,16 +372,16 @@ func deploymentRow(deployment appsv1.Deployment, usage corev1.ResourceList) Row 
 		Cells: []Cell{
 			{Value: deployment.Name, Class: "primary"},
 			{Value: deployment.Namespace},
-			{Value: fmt.Sprintf("%d/%d", deployment.Status.ReadyReplicas, desired), Class: "status " + healthKey(healthy)},
-			{Value: fmt.Sprint(deployment.Status.UpdatedReplicas)},
-			{Value: fmt.Sprint(deployment.Status.AvailableReplicas)},
-			{Value: resourceListValue(usage, corev1.ResourceCPU)},
-			{Value: containerResourceValue(deployment.Spec.Template.Spec.Containers, resourceRequests, corev1.ResourceCPU)},
-			{Value: containerResourceValue(deployment.Spec.Template.Spec.Containers, resourceLimits, corev1.ResourceCPU)},
-			{Value: resourceListValue(usage, corev1.ResourceMemory)},
-			{Value: containerResourceValue(deployment.Spec.Template.Spec.Containers, resourceRequests, corev1.ResourceMemory)},
-			{Value: containerResourceValue(deployment.Spec.Template.Spec.Containers, resourceLimits, corev1.ResourceMemory)},
-			{Value: age(deployment.CreationTimestamp.Time)},
+			cellWithClassAndOptionalSort(fmt.Sprintf("%d/%d", deployment.Status.ReadyReplicas, desired), "status "+healthKey(healthy), ratioSortValue(int64(deployment.Status.ReadyReplicas), int64(desired))),
+			cellWithSortValue(fmt.Sprint(deployment.Status.UpdatedReplicas), int64(deployment.Status.UpdatedReplicas)),
+			cellWithSortValue(fmt.Sprint(deployment.Status.AvailableReplicas), int64(deployment.Status.AvailableReplicas)),
+			resourceListCell(usage, corev1.ResourceCPU),
+			containerResourceCell(deployment.Spec.Template.Spec.Containers, resourceRequests, corev1.ResourceCPU),
+			containerResourceCell(deployment.Spec.Template.Spec.Containers, resourceLimits, corev1.ResourceCPU),
+			resourceListCell(usage, corev1.ResourceMemory),
+			containerResourceCell(deployment.Spec.Template.Spec.Containers, resourceRequests, corev1.ResourceMemory),
+			containerResourceCell(deployment.Spec.Template.Spec.Containers, resourceLimits, corev1.ResourceMemory),
+			ageCell(deployment.CreationTimestamp.Time),
 		},
 	}
 }
@@ -400,15 +401,15 @@ func statefulSetRow(statefulSet appsv1.StatefulSet, usage corev1.ResourceList) R
 		Cells: []Cell{
 			{Value: statefulSet.Name, Class: "primary"},
 			{Value: statefulSet.Namespace},
-			{Value: fmt.Sprintf("%d/%d", statefulSet.Status.ReadyReplicas, *desired), Class: "status " + healthKey(healthy)},
-			{Value: fmt.Sprint(statefulSet.Status.Replicas)},
-			{Value: resourceListValue(usage, corev1.ResourceCPU)},
-			{Value: containerResourceValue(statefulSet.Spec.Template.Spec.Containers, resourceRequests, corev1.ResourceCPU)},
-			{Value: containerResourceValue(statefulSet.Spec.Template.Spec.Containers, resourceLimits, corev1.ResourceCPU)},
-			{Value: resourceListValue(usage, corev1.ResourceMemory)},
-			{Value: containerResourceValue(statefulSet.Spec.Template.Spec.Containers, resourceRequests, corev1.ResourceMemory)},
-			{Value: containerResourceValue(statefulSet.Spec.Template.Spec.Containers, resourceLimits, corev1.ResourceMemory)},
-			{Value: age(statefulSet.CreationTimestamp.Time)},
+			cellWithClassAndOptionalSort(fmt.Sprintf("%d/%d", statefulSet.Status.ReadyReplicas, *desired), "status "+healthKey(healthy), ratioSortValue(int64(statefulSet.Status.ReadyReplicas), int64(*desired))),
+			cellWithSortValue(fmt.Sprint(statefulSet.Status.Replicas), int64(statefulSet.Status.Replicas)),
+			resourceListCell(usage, corev1.ResourceCPU),
+			containerResourceCell(statefulSet.Spec.Template.Spec.Containers, resourceRequests, corev1.ResourceCPU),
+			containerResourceCell(statefulSet.Spec.Template.Spec.Containers, resourceLimits, corev1.ResourceCPU),
+			resourceListCell(usage, corev1.ResourceMemory),
+			containerResourceCell(statefulSet.Spec.Template.Spec.Containers, resourceRequests, corev1.ResourceMemory),
+			containerResourceCell(statefulSet.Spec.Template.Spec.Containers, resourceLimits, corev1.ResourceMemory),
+			ageCell(statefulSet.CreationTimestamp.Time),
 		},
 	}
 }
@@ -423,16 +424,16 @@ func daemonSetRow(daemonSet appsv1.DaemonSet, usage corev1.ResourceList) Row {
 		Cells: []Cell{
 			{Value: daemonSet.Name, Class: "primary"},
 			{Value: daemonSet.Namespace},
-			{Value: fmt.Sprint(daemonSet.Status.DesiredNumberScheduled)},
-			{Value: fmt.Sprint(daemonSet.Status.NumberReady), Class: "status " + healthKey(healthy)},
-			{Value: fmt.Sprint(daemonSet.Status.NumberAvailable)},
-			{Value: resourceListValue(usage, corev1.ResourceCPU)},
-			{Value: containerResourceValue(daemonSet.Spec.Template.Spec.Containers, resourceRequests, corev1.ResourceCPU)},
-			{Value: containerResourceValue(daemonSet.Spec.Template.Spec.Containers, resourceLimits, corev1.ResourceCPU)},
-			{Value: resourceListValue(usage, corev1.ResourceMemory)},
-			{Value: containerResourceValue(daemonSet.Spec.Template.Spec.Containers, resourceRequests, corev1.ResourceMemory)},
-			{Value: containerResourceValue(daemonSet.Spec.Template.Spec.Containers, resourceLimits, corev1.ResourceMemory)},
-			{Value: age(daemonSet.CreationTimestamp.Time)},
+			cellWithSortValue(fmt.Sprint(daemonSet.Status.DesiredNumberScheduled), int64(daemonSet.Status.DesiredNumberScheduled)),
+			cellWithClassAndSortValue(fmt.Sprint(daemonSet.Status.NumberReady), "status "+healthKey(healthy), int64(daemonSet.Status.NumberReady)),
+			cellWithSortValue(fmt.Sprint(daemonSet.Status.NumberAvailable), int64(daemonSet.Status.NumberAvailable)),
+			resourceListCell(usage, corev1.ResourceCPU),
+			containerResourceCell(daemonSet.Spec.Template.Spec.Containers, resourceRequests, corev1.ResourceCPU),
+			containerResourceCell(daemonSet.Spec.Template.Spec.Containers, resourceLimits, corev1.ResourceCPU),
+			resourceListCell(usage, corev1.ResourceMemory),
+			containerResourceCell(daemonSet.Spec.Template.Spec.Containers, resourceRequests, corev1.ResourceMemory),
+			containerResourceCell(daemonSet.Spec.Template.Spec.Containers, resourceLimits, corev1.ResourceMemory),
+			ageCell(daemonSet.CreationTimestamp.Time),
 		},
 	}
 }
@@ -449,7 +450,7 @@ func serviceRow(service corev1.Service) Row {
 			{Value: string(service.Spec.Type)},
 			{Value: service.Spec.ClusterIP},
 			{Value: servicePorts(service.Spec.Ports)},
-			{Value: age(service.CreationTimestamp.Time)},
+			ageCell(service.CreationTimestamp.Time),
 		},
 	}
 }
@@ -470,7 +471,7 @@ func ingressRow(ingress networkingv1.Ingress) Row {
 			{Value: className},
 			{Value: ingressHosts(ingress.Spec.Rules)},
 			{Value: ingressAddresses(ingress.Status.LoadBalancer.Ingress)},
-			{Value: age(ingress.CreationTimestamp.Time)},
+			ageCell(ingress.CreationTimestamp.Time),
 		},
 	}
 }
@@ -493,7 +494,7 @@ func nodeRow(node corev1.Node) Row {
 			{Value: nodeRoles(node.Labels)},
 			{Value: node.Status.NodeInfo.KubeletVersion},
 			{Value: nodeInternalIP(node.Status.Addresses)},
-			{Value: age(node.CreationTimestamp.Time)},
+			ageCell(node.CreationTimestamp.Time),
 		},
 	}
 }
@@ -507,7 +508,7 @@ func namespaceRow(namespace corev1.Namespace) Row {
 		Cells: []Cell{
 			{Value: namespace.Name, Class: "primary"},
 			{Value: string(namespace.Status.Phase), Class: "status " + healthKey(healthy)},
-			{Value: age(namespace.CreationTimestamp.Time)},
+			ageCell(namespace.CreationTimestamp.Time),
 		},
 	}
 }
@@ -537,7 +538,7 @@ func sortTableRows(table *Table, sortColumn, sortOrder string) {
 
 	columnIndex := sortColumnIndex(table.Columns, sortColumn)
 	sort.SliceStable(table.Rows, func(i, j int) bool {
-		cmp := compareCellValues(rowCellValue(table.Rows[i], columnIndex), rowCellValue(table.Rows[j], columnIndex))
+		cmp := compareCellValues(rowCell(table.Rows[i], columnIndex), rowCell(table.Rows[j], columnIndex))
 		if cmp == 0 {
 			return compareDefaultRows(table.Rows[i], table.Rows[j], table.Namespaced) < 0
 		}
@@ -587,14 +588,28 @@ func rowSortKey(row Row, namespaced bool) []string {
 }
 
 func rowCellValue(row Row, columnIndex int) string {
-	if columnIndex < 0 || columnIndex >= len(row.Cells) {
-		return ""
-	}
-	return row.Cells[columnIndex].Value
+	return rowCell(row, columnIndex).Value
 }
 
-func compareCellValues(left, right string) int {
-	return strings.Compare(strings.ToLower(strings.TrimSpace(left)), strings.ToLower(strings.TrimSpace(right)))
+func rowCell(row Row, columnIndex int) Cell {
+	if columnIndex < 0 || columnIndex >= len(row.Cells) {
+		return Cell{}
+	}
+	return row.Cells[columnIndex]
+}
+
+func compareCellValues(left, right Cell) int {
+	if left.SortValue != nil && right.SortValue != nil {
+		switch {
+		case *left.SortValue < *right.SortValue:
+			return -1
+		case *left.SortValue > *right.SortValue:
+			return 1
+		default:
+			return 0
+		}
+	}
+	return strings.Compare(strings.ToLower(strings.TrimSpace(left.Value)), strings.ToLower(strings.TrimSpace(right.Value)))
 }
 
 func healthKey(ok bool) string {
@@ -621,7 +636,47 @@ func resourceLimits(resources corev1.ResourceRequirements) corev1.ResourceList {
 	return resources.Limits
 }
 
+func cellWithSortValue(value string, sortValue int64) Cell {
+	return cellWithOptionalSort(value, ptrInt64(sortValue))
+}
+
+func cellWithClassAndSortValue(value, class string, sortValue int64) Cell {
+	return cellWithClassAndOptionalSort(value, class, ptrInt64(sortValue))
+}
+
+func cellWithOptionalSort(value string, sortValue *int64) Cell {
+	return Cell{Value: value, SortValue: sortValue}
+}
+
+func cellWithClassAndOptionalSort(value, class string, sortValue *int64) Cell {
+	return Cell{Value: value, Class: class, SortValue: sortValue}
+}
+
+func ptrInt64(value int64) *int64 {
+	return &value
+}
+
+func ratioSortValue(numerator, denominator int64) *int64 {
+	if denominator <= 0 {
+		return nil
+	}
+	const scale = 1_000_000
+	return ptrInt64(numerator * scale / denominator)
+}
+
+func ageCell(t time.Time) Cell {
+	value := age(t)
+	if t.IsZero() {
+		return Cell{Value: value}
+	}
+	return cellWithSortValue(value, int64(time.Since(t).Seconds()))
+}
+
 func containerResourceValue(containers []corev1.Container, selector resourceSelector, name corev1.ResourceName) string {
+	return containerResourceCell(containers, selector, name).Value
+}
+
+func containerResourceCell(containers []corev1.Container, selector resourceSelector, name corev1.ResourceName) Cell {
 	var total resource.Quantity
 	for _, container := range containers {
 		quantity, ok := selector(container.Resources)[name]
@@ -629,28 +684,37 @@ func containerResourceValue(containers []corev1.Container, selector resourceSele
 			total.Add(quantity)
 		}
 	}
-	return resourceQuantityValue(name, total)
+	return resourceQuantityCell(name, total)
 }
 
 func resourceListValue(values corev1.ResourceList, name corev1.ResourceName) string {
+	return resourceListCell(values, name).Value
+}
+
+func resourceListCell(values corev1.ResourceList, name corev1.ResourceName) Cell {
 	quantity, ok := values[name]
 	if !ok {
-		return "-"
+		return Cell{Value: "-"}
 	}
-	return resourceQuantityValue(name, quantity)
+	return resourceQuantityCell(name, quantity)
 }
 
 func resourceQuantityValue(name corev1.ResourceName, quantity resource.Quantity) string {
+	return resourceQuantityCell(name, quantity).Value
+}
+
+func resourceQuantityCell(name corev1.ResourceName, quantity resource.Quantity) Cell {
 	if quantity.Sign() == 0 {
-		return "-"
+		return Cell{Value: "-"}
 	}
 	switch name {
 	case corev1.ResourceCPU:
-		return cpuValue(quantity)
+		return cellWithSortValue(cpuValue(quantity), quantity.MilliValue())
 	case corev1.ResourceMemory:
-		return byteValue(quantity.Value())
+		bytes := quantity.Value()
+		return cellWithSortValue(byteValue(bytes), bytes)
 	default:
-		return quantity.String()
+		return Cell{Value: quantity.String()}
 	}
 }
 
