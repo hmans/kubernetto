@@ -83,18 +83,20 @@ func hasClass(classes, class string) bool {
 
 func appSignalAttrs(state PageState) templ.Attributes {
 	return templ.Attributes{
-		"data-signals:resource":  "'" + state.Signals.Resource + "'",
-		"data-signals:namespace": "'" + state.Signals.Namespace + "'",
-		"data-signals:query":     "'" + state.Signals.Query + "'",
-		"data-signals:loading":   "false",
-		"data-init":              "@get('/events')",
+		"data-signals:resource":   jsString(state.Signals.Resource),
+		"data-signals:namespace":  jsString(state.Signals.Namespace),
+		"data-signals:query":      jsString(state.Signals.Query),
+		"data-signals:sortColumn": jsString(state.Signals.SortColumn),
+		"data-signals:sortOrder":  jsString(state.Signals.SortOrder),
+		"data-signals:loading":    "false",
+		"data-init":               "@get('/events')",
 	}
 }
 
 func resourceButtonAttrs(def kube.ResourceDef) templ.Attributes {
 	return templ.Attributes{
 		"data-indicator:loading": true,
-		"data-on:click":          "$resource = '" + string(def.Kind) + "'; @get('/ui/table')",
+		"data-on:click":          "$resource = '" + string(def.Kind) + "'; $sortColumn = ''; $sortOrder = ''; @get('/ui/table')",
 	}
 }
 
@@ -119,6 +121,53 @@ func refreshButtonAttrs() templ.Attributes {
 		"data-indicator:loading": true,
 		"data-on:click":          "@get('/ui/refresh')",
 	}
+}
+
+func sortHeaderAttrs(column string) templ.Attributes {
+	columnLiteral := jsString(column)
+	nextOrder := "$sortColumn == " + columnLiteral + " ? ($sortOrder == 'asc' ? 'desc' : ($sortOrder == 'desc' ? '' : 'asc')) : 'asc'"
+	return templ.Attributes{
+		"data-indicator:loading": true,
+		"data-on:click":          "$sortOrder = " + nextOrder + "; $sortColumn = $sortOrder == '' ? '' : " + columnLiteral + "; @get('/ui/table')",
+	}
+}
+
+func sortAria(column, sortColumn, sortOrder string) string {
+	if column != sortColumn {
+		return "none"
+	}
+	switch sortOrder {
+	case "asc":
+		return "ascending"
+	case "desc":
+		return "descending"
+	default:
+		return "none"
+	}
+}
+
+func sortButtonClass(column, sortColumn string) string {
+	if column == sortColumn {
+		return "sort-heading active"
+	}
+	return "sort-heading"
+}
+
+func sortIndicator(column, sortColumn, sortOrder string) string {
+	if column != sortColumn {
+		return ""
+	}
+	if sortOrder == "asc" {
+		return "↑"
+	}
+	if sortOrder == "desc" {
+		return "↓"
+	}
+	return ""
+}
+
+func jsString(value string) string {
+	return fmt.Sprintf("%q", value)
 }
 
 func progressAttrs() templ.Attributes {

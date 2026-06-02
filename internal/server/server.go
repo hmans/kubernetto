@@ -18,9 +18,11 @@ type Server struct {
 }
 
 type Signals struct {
-	Resource  string `json:"resource"`
-	Namespace string `json:"namespace"`
-	Query     string `json:"query"`
+	Resource   string `json:"resource"`
+	Namespace  string `json:"namespace"`
+	Query      string `json:"query"`
+	SortColumn string `json:"sortColumn"`
+	SortOrder  string `json:"sortOrder"`
 }
 
 func New(cluster *kube.Cluster, store *kube.ResourceStore, logger *slog.Logger) *Server {
@@ -98,13 +100,13 @@ func (s *Server) state(signals Signals) PageState {
 	}
 
 	summary := kube.Summary{UpdatedAt: time.Now(), Error: "No Kubernetes client is configured."}
-	table := kube.Table{Kind: kind, Label: def.Label, Namespace: namespace, Query: signals.Query, UpdatedAt: time.Now(), Namespaced: def.Scope == "namespaced"}
+	table := kube.Table{Kind: kind, Label: def.Label, Namespace: namespace, Query: signals.Query, SortColumn: signals.SortColumn, SortOrder: signals.SortOrder, UpdatedAt: time.Now(), Namespaced: def.Scope == "namespaced"}
 	namespaces := []string{}
 	namespaceErr := ""
 
 	if s.store != nil {
 		summary = s.store.Summary()
-		table = s.store.Table(kind, namespace, signals.Query)
+		table = s.store.TableWithSort(kind, namespace, signals.Query, signals.SortColumn, signals.SortOrder)
 		var err error
 		namespaces, err = s.store.Namespaces()
 		if err != nil {
@@ -115,7 +117,7 @@ func (s *Server) state(signals Signals) PageState {
 	return PageState{
 		Cluster:      s.cluster,
 		Resources:    kube.ResourceDefs,
-		Signals:      Signals{Resource: string(kind), Namespace: namespace, Query: signals.Query},
+		Signals:      Signals{Resource: string(kind), Namespace: namespace, Query: signals.Query, SortColumn: table.SortColumn, SortOrder: table.SortOrder},
 		Summary:      summary,
 		Table:        table,
 		Namespaces:   namespaces,
@@ -138,6 +140,12 @@ func readSignals(r *http.Request) Signals {
 	}
 	if query := q.Get("query"); query != "" {
 		signals.Query = query
+	}
+	if sortColumn := q.Get("sortColumn"); sortColumn != "" {
+		signals.SortColumn = sortColumn
+	}
+	if sortOrder := q.Get("sortOrder"); sortOrder != "" {
+		signals.SortOrder = sortOrder
 	}
 	if signals.Resource == "" {
 		signals.Resource = string(kube.KindPods)
