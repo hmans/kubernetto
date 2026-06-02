@@ -10,16 +10,6 @@ run = "mise watch --restart --stop-signal TERM --map-signal HUP:TERM app"
 
 [tasks.build]
 description = "Build Kubernetto"
-run = """
-pnpm build:assets
-go generate ./...
-go build -o ./kubernetto ./cmd/kubernetto
-"""
-
-[tasks.app]
-hide = true
-depends = "build"
-run = "exec ./kubernetto"
 sources = [
 	"**/*.go",
 	"**/*.templ",
@@ -32,3 +22,17 @@ sources = [
 	"mise.toml",
 	"!**/*_templ.go",
 ]
+outputs = [
+	"kubernetto",
+	"internal/server/ui/*_templ.go",
+]
+run = """
+pnpm build:assets
+go generate ./...
+go build -o ./kubernetto ./cmd/kubernetto
+"""
+
+[tasks.app]
+hide = true
+depends = "build"
+run = "exec ./kubernetto"
