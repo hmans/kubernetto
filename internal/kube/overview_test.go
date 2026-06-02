@@ -77,26 +77,49 @@ func TestResourceStoreOverviewSummarizesClusterHealth(t *testing.T) {
 	if got := overviewMetricValue(overview.Stats, "Nodes ready"); got != "1/2" {
 		t.Fatalf("node health = %q", got)
 	}
+	assertOverviewMetricRatio(t, overview.Stats, "Nodes ready", 50)
 	if got := overviewMetricValue(overview.Stats, "Pods healthy"); got != "1/3" {
 		t.Fatalf("pod health = %q", got)
 	}
+	assertOverviewMetricRatio(t, overview.Stats, "Pods healthy", 100.0/3.0)
 	if got := overviewMetricValue(overview.Stats, "Workloads ready"); got != "0/1" {
 		t.Fatalf("workload health = %q", got)
 	}
+	assertOverviewMetricRatio(t, overview.Stats, "Workloads ready", 0)
 	if got := overviewMetricValue(overview.Resources, "Services"); got != "1" {
 		t.Fatalf("service count = %q", got)
 	}
 	if got := overviewMetricValue(overview.Stats, "CPU"); got != "250m" {
 		t.Fatalf("cpu usage = %q", got)
 	}
+	assertOverviewMetricRatio(t, overview.Stats, "CPU", 6.25)
 	if got := overviewMetricValue(overview.Stats, "Memory"); got != "128Mi" {
 		t.Fatalf("memory usage = %q", got)
 	}
+	assertOverviewMetricRatio(t, overview.Stats, "Memory", 12.5)
 	if len(overview.WarningEvents) != 1 {
 		t.Fatalf("warnings = %d, want 1", len(overview.WarningEvents))
 	}
 	if event := overview.WarningEvents[0]; event.Reason != "BackOff" || event.InvolvedObject != "Pod/api" || event.Count != 3 {
 		t.Fatalf("warning event = %#v", event)
+	}
+}
+
+func TestUsageMetricsOmitRatiosWithoutUsageOrAllocatable(t *testing.T) {
+	unavailable := usageMetrics(nil, nil)
+	for _, metric := range unavailable {
+		if metric.Ratio != nil {
+			t.Fatalf("%s unavailable ratio = %#v, want nil", metric.Label, metric.Ratio)
+		}
+	}
+
+	usageOnly := usageMetrics(corev1.ResourceList{
+		corev1.ResourceCPU: resource.MustParse("250m"),
+	}, nil)
+	for _, metric := range usageOnly {
+		if metric.Ratio != nil {
+			t.Fatalf("%s ratio without allocatable = %#v, want nil", metric.Label, metric.Ratio)
+		}
 	}
 }
 
@@ -109,6 +132,23 @@ func overviewMetricValue(metrics []OverviewMetric, label string) string {
 	return ""
 }
 
+func assertOverviewMetricRatio(t *testing.T, metrics []OverviewMetric, label string, want float64) {
+	t.Helper()
+	for _, metric := range metrics {
+		if metric.Label != label {
+			continue
+		}
+		if metric.Ratio == nil {
+			t.Fatalf("%s ratio is nil", label)
+		}
+		if diff := metric.Ratio.Percent - want; diff < -0.001 || diff > 0.001 {
+			t.Fatalf("%s ratio = %.3f, want %.3f", label, metric.Ratio.Percent, want)
+		}
+		return
+	}
+	t.Fatalf("missing metric %q", label)
+}
+
 func testNode(name string, ready bool) *corev1.Node {
 	status := corev1.ConditionFalse
 	if ready {
@@ -117,6 +157,10 @@ func testNode(name string, ready bool) *corev1.Node {
 	return &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 		Status: corev1.NodeStatus{
+			Allocatable: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("2"),
+				corev1.ResourceMemory: resource.MustParse("512Mi"),
+			},
 			Conditions: []corev1.NodeCondition{
 				{Type: corev1.NodeReady, Status: status},
 			},
