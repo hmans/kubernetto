@@ -8,6 +8,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 func (s *ResourceStore) Overview() ClusterOverview {
@@ -36,6 +37,7 @@ func (s *ResourceStore) Overview() ClusterOverview {
 	daemonSets := s.listDaemonSets("")
 	warningEvents := s.recentWarningEvents(6)
 	usage := s.totalPodUsage()
+	allocatable := nodeAllocatable(nodes)
 
 	readyNodes := 0
 	for _, node := range nodes {
@@ -64,12 +66,12 @@ func (s *ResourceStore) Overview() ClusterOverview {
 
 	readyWorkloads, totalWorkloads := workloadHealth(deployments, statefulSets, daemonSets)
 	overview.Stats = []OverviewMetric{
-		{Label: "Nodes ready", Value: fmt.Sprintf("%d/%d", readyNodes, len(nodes)), Kind: KindNodes},
-		{Label: "Pods healthy", Value: fmt.Sprintf("%d/%d", healthyPods, len(pods)), Detail: podPhaseDetail(pendingPods, failedPods, succeededPods), Kind: KindPods},
-		{Label: "Workloads ready", Value: fmt.Sprintf("%d/%d", readyWorkloads, totalWorkloads), Kind: KindDeployments},
+		{Label: "Nodes ready", Value: fmt.Sprintf("%d/%d", readyNodes, len(nodes)), StatusKey: healthKey(readyNodes == len(nodes) && len(nodes) > 0), Kind: KindNodes, Ratio: countRatio(readyNodes, len(nodes))},
+		{Label: "Pods healthy", Value: fmt.Sprintf("%d/%d", healthyPods, len(pods)), Detail: podPhaseDetail(pendingPods, failedPods, succeededPods), StatusKey: healthKey(healthyPods == len(pods) && len(pods) > 0), Kind: KindPods, Ratio: countRatio(healthyPods, len(pods))},
+		{Label: "Workloads ready", Value: fmt.Sprintf("%d/%d", readyWorkloads, totalWorkloads), StatusKey: healthKey(readyWorkloads == totalWorkloads && totalWorkloads > 0), Kind: KindDeployments, Ratio: countRatio(readyWorkloads, totalWorkloads)},
 		{Label: "Warnings", Value: fmt.Sprint(len(warningEvents)), Detail: "Recent warning events", Kind: KindOverview},
 	}
-	overview.Stats = append(overview.Stats, usageMetrics(usage)...)
+	overview.Stats = append(overview.Stats, usageMetrics(usage, allocatable)...)
 	overview.Resources = []OverviewMetric{
 		{Label: "Pods", Value: fmt.Sprint(len(pods)), Kind: KindPods},
 		{Label: "Deployments", Value: fmt.Sprint(len(deployments)), Kind: KindDeployments},
@@ -144,7 +146,7 @@ func podPhaseDetail(pending, failed, succeeded int) string {
 	return strings.Join(parts, ", ")
 }
 
-func usageMetrics(usage corev1.ResourceList) []OverviewMetric {
+func usageMetrics(usage, allocatable corev1.ResourceList) []OverviewMetric {
 	if len(usage) == 0 {
 		return []OverviewMetric{
 			{Label: "CPU", Value: "Unavailable", Detail: "Metrics API has not reported pod usage", StatusKey: "neutral"},
@@ -152,9 +154,67 @@ func usageMetrics(usage corev1.ResourceList) []OverviewMetric {
 		}
 	}
 	return []OverviewMetric{
-		{Label: "CPU", Value: resourceListValue(usage, corev1.ResourceCPU), Detail: "Current pod usage", StatusKey: "neutral", Kind: KindPods},
-		{Label: "Memory", Value: resourceListValue(usage, corev1.ResourceMemory), Detail: "Current pod usage", StatusKey: "neutral", Kind: KindPods},
+		usageMetric("CPU", usage, allocatable, corev1.ResourceCPU),
+		usageMetric("Memory", usage, allocatable, corev1.ResourceMemory),
 	}
+}
+
+func usageMetric(label string, usage, allocatable corev1.ResourceList, name corev1.ResourceName) OverviewMetric {
+	value := resourceListValue(usage, name)
+	metric := OverviewMetric{Label: label, Value: value, Detail: "Current pod usage", StatusKey: "neutral", Kind: KindPods}
+	used, hasUsed := usage[name]
+	total, hasTotal := allocatable[name]
+	if !hasUsed || !hasTotal || total.Sign() <= 0 {
+		return metric
+	}
+	metric.Detail = fmt.Sprintf("of %s allocatable", resourceQuantityValue(name, total))
+	metric.Ratio = quantityRatio(used, total, name)
+	return metric
+}
+
+func nodeAllocatable(nodes []*corev1.Node) corev1.ResourceList {
+	total := corev1.ResourceList{}
+	for _, node := range nodes {
+		addResourceList(total, node.Status.Allocatable)
+	}
+	if len(total) == 0 {
+		return nil
+	}
+	return total
+}
+
+func countRatio(numerator, denominator int) *OverviewRatio {
+	if denominator <= 0 {
+		return nil
+	}
+	return boundedRatio(float64(numerator), float64(denominator), fmt.Sprint(numerator), fmt.Sprint(denominator))
+}
+
+func quantityRatio(numerator, denominator resource.Quantity, name corev1.ResourceName) *OverviewRatio {
+	var numeratorValue, denominatorValue int64
+	switch name {
+	case corev1.ResourceCPU:
+		numeratorValue = numerator.MilliValue()
+		denominatorValue = denominator.MilliValue()
+	default:
+		numeratorValue = numerator.Value()
+		denominatorValue = denominator.Value()
+	}
+	if denominatorValue <= 0 {
+		return nil
+	}
+	return boundedRatio(float64(numeratorValue), float64(denominatorValue), resourceQuantityValue(name, numerator), resourceQuantityValue(name, denominator))
+}
+
+func boundedRatio(numerator, denominator float64, numeratorLabel, denominatorLabel string) *OverviewRatio {
+	percent := numerator / denominator * 100
+	if percent < 0 {
+		percent = 0
+	}
+	if percent > 100 {
+		percent = 100
+	}
+	return &OverviewRatio{Percent: percent, Numerator: numeratorLabel, Denominator: denominatorLabel}
 }
 
 func (s *ResourceStore) totalPodUsage() corev1.ResourceList {
