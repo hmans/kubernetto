@@ -11,11 +11,13 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
+	metricsclient "k8s.io/metrics/pkg/client/clientset/versioned"
 )
 
 type Cluster struct {
 	Clientset      kubernetes.Interface
 	Discovery      discovery.DiscoveryInterface
+	MetricsClient  metricsclient.Interface
 	ContextName    string
 	ClusterName    string
 	UserName       string
@@ -52,11 +54,16 @@ func NewCluster(kubeconfig string) (*Cluster, error) {
 	if err != nil {
 		return nil, err
 	}
+	metricsClient, err := metricsclient.NewForConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
 	return &Cluster{
-		Clientset:    clientset,
-		Discovery:    clientset.Discovery(),
-		ContextName:  "in-cluster",
-		ConfigSource: "in-cluster service account",
+		Clientset:     clientset,
+		Discovery:     clientset.Discovery(),
+		MetricsClient: metricsClient,
+		ContextName:   "in-cluster",
+		ConfigSource:  "in-cluster service account",
 	}, nil
 }
 
@@ -81,6 +88,10 @@ func fromKubeconfig(kubeconfig string) (*Cluster, error) {
 	if err != nil {
 		return nil, err
 	}
+	metricsClient, err := metricsclient.NewForConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
 
 	contextInfo := raw.Contexts[raw.CurrentContext]
 	namespace := "default"
@@ -98,6 +109,7 @@ func fromKubeconfig(kubeconfig string) (*Cluster, error) {
 	return &Cluster{
 		Clientset:      clientset,
 		Discovery:      clientset.Discovery(),
+		MetricsClient:  metricsClient,
 		ContextName:    raw.CurrentContext,
 		ClusterName:    clusterName,
 		UserName:       userName,

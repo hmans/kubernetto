@@ -7,8 +7,13 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
+	metricsv1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
+	metricsfake "k8s.io/metrics/pkg/client/clientset/versioned/fake"
 )
 
 func TestResourceStoreReadsFromInformerCache(t *testing.T) {
@@ -17,10 +22,29 @@ func TestResourceStoreReadsFromInformerCache(t *testing.T) {
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "prod"}},
 		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
 		&corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "prod"},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "api",
+				Namespace: "prod",
+				Labels:    map[string]string{"app": "web"},
+			},
 			Spec: corev1.PodSpec{
-				Containers: []corev1.Container{{Name: "api"}},
-				NodeName:   "node-1",
+				Containers: []corev1.Container{
+					{
+						Name: "api",
+						Resources: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceCPU:              resource.MustParse("250m"),
+								corev1.ResourceMemory:           resource.MustParse("512Mi"),
+								corev1.ResourceEphemeralStorage: resource.MustParse("1Gi"),
+							},
+							Limits: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("1"),
+								corev1.ResourceMemory: resource.MustParse("1Gi"),
+							},
+						},
+					},
+				},
+				NodeName: "node-1",
 			},
 			Status: corev1.PodStatus{
 				Phase: corev1.PodRunning,
@@ -46,6 +70,28 @@ func TestResourceStoreReadsFromInformerCache(t *testing.T) {
 			ObjectMeta: metav1.ObjectMeta{Name: "web", Namespace: "prod"},
 			Spec: appsv1.DeploymentSpec{
 				Replicas: ptr(int32(2)),
+				Selector: &metav1.LabelSelector{
+					MatchLabels: map[string]string{"app": "web"},
+				},
+				Template: corev1.PodTemplateSpec{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name: "web",
+								Resources: corev1.ResourceRequirements{
+									Requests: corev1.ResourceList{
+										corev1.ResourceCPU:    resource.MustParse("100m"),
+										corev1.ResourceMemory: resource.MustParse("128Mi"),
+									},
+									Limits: corev1.ResourceList{
+										corev1.ResourceCPU:    resource.MustParse("500m"),
+										corev1.ResourceMemory: resource.MustParse("256Mi"),
+									},
+								},
+							},
+						},
+					},
+				},
 			},
 			Status: appsv1.DeploymentStatus{
 				ReadyReplicas:     2,
@@ -56,6 +102,28 @@ func TestResourceStoreReadsFromInformerCache(t *testing.T) {
 	)
 
 	store := syncedTestStore(t, clientset)
+	metricsClient := metricsfake.NewSimpleClientset()
+	metricsClient.PrependReactor("list", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, &metricsv1beta1.PodMetricsList{
+			Items: []metricsv1beta1.PodMetrics{
+				{
+					ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "prod"},
+					Containers: []metricsv1beta1.ContainerMetrics{
+						{
+							Name: "api",
+							Usage: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("37m"),
+								corev1.ResourceMemory: resource.MustParse("214Mi"),
+							},
+						},
+					},
+				},
+			},
+		}, nil
+	})
+	if err := store.loadPodMetrics(context.Background(), metricsClient); err != nil {
+		t.Fatalf("load pod metrics: %v", err)
+	}
 
 	summary := store.Summary()
 	if summary.Error != "" {
@@ -82,6 +150,53 @@ func TestResourceStoreReadsFromInformerCache(t *testing.T) {
 	}
 	if table.Rows[0].Name != "api" || table.Rows[1].Name != "worker" {
 		t.Fatalf("rows not sorted by name: %#v", table.Rows)
+	}
+	if want := []string{"Name", "Namespace", "Ready", "Status", "Restarts", "CPU", "CPU Req", "CPU Limit", "MEM", "MEM Req", "MEM Limit", "Node", "Age"}; !equalStrings(table.Columns, want) {
+		t.Fatalf("pod columns = %#v, want %#v", table.Columns, want)
+	}
+	if got, want := table.Rows[0].Cells[5].Value, "37m"; got != want {
+		t.Fatalf("pod cpu = %q, want %q", got, want)
+	}
+	if got, want := table.Rows[0].Cells[6].Value, "250m"; got != want {
+		t.Fatalf("pod cpu request = %q, want %q", got, want)
+	}
+	if got, want := table.Rows[0].Cells[7].Value, "1"; got != want {
+		t.Fatalf("pod cpu limit = %q, want %q", got, want)
+	}
+	if got, want := table.Rows[0].Cells[8].Value, "214Mi"; got != want {
+		t.Fatalf("pod mem = %q, want %q", got, want)
+	}
+	if got, want := table.Rows[0].Cells[9].Value, "512Mi"; got != want {
+		t.Fatalf("pod mem request = %q, want %q", got, want)
+	}
+	if got, want := table.Rows[0].Cells[10].Value, "1Gi"; got != want {
+		t.Fatalf("pod mem limit = %q, want %q", got, want)
+	}
+
+	deployments := store.Table(KindDeployments, "prod", "")
+	if deployments.Error != "" {
+		t.Fatalf("deployments error = %q", deployments.Error)
+	}
+	if want := []string{"Name", "Namespace", "Ready", "Up-to-date", "Available", "CPU", "CPU Req", "CPU Limit", "MEM", "MEM Req", "MEM Limit", "Age"}; !equalStrings(deployments.Columns, want) {
+		t.Fatalf("deployment columns = %#v, want %#v", deployments.Columns, want)
+	}
+	if got, want := deployments.Rows[0].Cells[5].Value, "37m"; got != want {
+		t.Fatalf("deployment cpu = %q, want %q", got, want)
+	}
+	if got, want := deployments.Rows[0].Cells[6].Value, "100m"; got != want {
+		t.Fatalf("deployment cpu request = %q, want %q", got, want)
+	}
+	if got, want := deployments.Rows[0].Cells[7].Value, "500m"; got != want {
+		t.Fatalf("deployment cpu limit = %q, want %q", got, want)
+	}
+	if got, want := deployments.Rows[0].Cells[8].Value, "214Mi"; got != want {
+		t.Fatalf("deployment mem = %q, want %q", got, want)
+	}
+	if got, want := deployments.Rows[0].Cells[9].Value, "128Mi"; got != want {
+		t.Fatalf("deployment mem request = %q, want %q", got, want)
+	}
+	if got, want := deployments.Rows[0].Cells[10].Value, "256Mi"; got != want {
+		t.Fatalf("deployment mem limit = %q, want %q", got, want)
 	}
 }
 
