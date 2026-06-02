@@ -1,3 +1,5 @@
+@import "@fontsource-variable/inter";
+
 :root {
   color-scheme: light;
   --bg: #f5f7f8;
@@ -110,7 +112,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font: 14px/1.45 "Inter Variable", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   letter-spacing: 0;
 }
 button, input, select { font: inherit; }

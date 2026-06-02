@@ -1,0 +1,10 @@
+{
+  "private": true,
+  "scripts": {
+    "build:assets": "vite build"
+  },
+  "devDependencies": {
+    "@fontsource-variable/inter": "^5.2.8",
+    "vite": "^7.0.0"
+  }
+}

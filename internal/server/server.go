@@ -61,8 +61,7 @@ func New(clusters []*kube.Cluster, ctx context.Context, logger *slog.Logger) *Se
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", s.handleIndex)
-	mux.HandleFunc("GET /assets/app.css", ui.HandleStyles)
-	mux.HandleFunc("GET /assets/app.js", ui.HandleScript)
+	mux.HandleFunc("GET /assets/", ui.HandleAssets)
 	mux.HandleFunc("GET /ui/refresh", s.handleRefresh)
 	mux.HandleFunc("GET /ui/summary", s.handleSummary)
 	mux.HandleFunc("GET /ui/table", s.handleTable)
@@ -314,7 +313,7 @@ func withSecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-eval' https://cdn.jsdelivr.net; style-src 'self'; connect-src 'self' https://cdn.jsdelivr.net; img-src 'self' data:")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-eval' https://cdn.jsdelivr.net; style-src 'self'; font-src 'self'; connect-src 'self' https://cdn.jsdelivr.net; img-src 'self' data:")
 		next.ServeHTTP(w, r)
 	})
 }
