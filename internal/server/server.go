@@ -84,7 +84,7 @@ func (s *Server) Routes() http.Handler {
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
-	state := s.state(Signals{Resource: string(kube.KindPods)})
+	state := s.state(readSignals(r))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := renderPage(w, state); err != nil {
 		s.logger.Error("render index", "error", err)

@@ -114,6 +114,8 @@ func appSignalAttrs(state PageState) templ.Attributes {
 func resourceButtonAttrs(def kube.ResourceDef) templ.Attributes {
 	return templ.Attributes{
 		"data-indicator:loading": true,
+		"data-resource-kind":     string(def.Kind),
+		"data-resource-scope":    def.Scope,
 		"data-on:click":          "$resource = " + signalLiteral(string(def.Kind)) + "; $sortColumn = ''; $sortOrder = ''; $selectedName = ''; $selectedNamespace = ''; $detailMode = 'overview'; @get('/ui/table')",
 	}
 }
@@ -154,6 +156,7 @@ func sortHeaderAttrs(column string) templ.Attributes {
 	nextOrder := "$sortColumn == " + columnLiteral + " ? ($sortOrder == 'asc' ? 'desc' : ($sortOrder == 'desc' ? '' : 'asc')) : 'asc'"
 	return templ.Attributes{
 		"data-indicator:loading": true,
+		"data-sort-column":       column,
 		"data-on:click":          "$sortOrder = " + nextOrder + "; $sortColumn = $sortOrder == '' ? '' : " + columnLiteral + "; $selectedName = ''; $selectedNamespace = ''; $detailMode = 'overview'; @get('/ui/table')",
 	}
 }
@@ -204,6 +207,8 @@ func rowAttrs(row kube.Row, state PageState) templ.Attributes {
 		"tabindex":               "0",
 		"aria-selected":          checkedBool(selectedRow(row, state)),
 		"data-selected":          checkedBool(selectedRow(row, state)),
+		"data-row-name":          row.Name,
+		"data-row-namespace":     row.Namespace,
 		"data-indicator:loading": true,
 		"data-on:click":          "$selectedName = " + signalLiteral(row.Name) + "; $selectedNamespace = " + signalLiteral(row.Namespace) + "; $detailMode = 'overview'; @get('/ui/selection')",
 		"data-on:keydown__enter": "$selectedName = " + signalLiteral(row.Name) + "; $selectedNamespace = " + signalLiteral(row.Namespace) + "; $detailMode = 'overview'; @get('/ui/selection')",
@@ -214,6 +219,7 @@ func closeDetailAttrs() templ.Attributes {
 	return templ.Attributes{
 		"type":                   "button",
 		"title":                  "Close details",
+		"data-close-detail":      "true",
 		"data-indicator:loading": true,
 		"data-on:click":          "$selectedName = ''; $selectedNamespace = ''; $detailMode = 'overview'; @get('/ui/selection')",
 	}
@@ -223,6 +229,7 @@ func detailTabAttrs(mode string, state PageState) templ.Attributes {
 	return templ.Attributes{
 		"type":                   "button",
 		"aria-selected":          checkedBool(state.Signals.DetailMode == mode),
+		"data-detail-mode":       mode,
 		"data-indicator:loading": true,
 		"data-on:click":          "$detailMode = " + signalLiteral(mode) + "; @get('/ui/detail')",
 	}
