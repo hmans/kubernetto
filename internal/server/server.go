@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -14,6 +13,7 @@ import (
 
 type Server struct {
 	cluster *kube.Cluster
+	store   *kube.ResourceStore
 	logger  *slog.Logger
 }
 
@@ -23,11 +23,11 @@ type Signals struct {
 	Query     string `json:"query"`
 }
 
-func New(cluster *kube.Cluster, logger *slog.Logger) *Server {
+func New(cluster *kube.Cluster, store *kube.ResourceStore, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{cluster: cluster, logger: logger}
+	return &Server{cluster: cluster, store: store, logger: logger}
 }
 
 func (s *Server) Routes() http.Handler {
@@ -42,10 +42,7 @@ func (s *Server) Routes() http.Handler {
 }
 
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
-	defer cancel()
-
-	state := s.state(ctx, Signals{Resource: string(kube.KindPods)})
+	state := s.state(Signals{Resource: string(kube.KindPods)})
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := renderPage(w, state); err != nil {
 		s.logger.Error("render index", "error", err)
@@ -53,11 +50,8 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
-	defer cancel()
-
 	signals := readSignals(r)
-	state := s.state(ctx, signals)
+	state := s.state(signals)
 	sse := datastar.NewSSE(w, r)
 	sse.PatchElements(renderFragment(resourceNav(state)))
 	sse.PatchElements(renderFragment(summaryView(state)))
@@ -66,11 +60,8 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleTable(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
-	defer cancel()
-
 	signals := readSignals(r)
-	state := s.state(ctx, signals)
+	state := s.state(signals)
 	sse := datastar.NewSSE(w, r)
 	sse.PatchElements(renderFragment(resourceNav(state)))
 	sse.PatchElements(renderFragment(namespacePicker(state)))
@@ -87,9 +78,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case <-ticker.C:
-			ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
-			state := s.state(ctx, readSignals(r))
-			cancel()
+			state := s.state(readSignals(r))
 			sse.PatchElements(renderFragment(summaryView(state)))
 		}
 	}
@@ -99,7 +88,7 @@ func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) state(ctx context.Context, signals Signals) PageState {
+func (s *Server) state(signals Signals) PageState {
 	kind := kube.NormalizeKind(signals.Resource)
 	namespace := signals.Namespace
 
@@ -113,11 +102,11 @@ func (s *Server) state(ctx context.Context, signals Signals) PageState {
 	namespaces := []string{}
 	namespaceErr := ""
 
-	if s.cluster != nil {
-		summary = s.cluster.Summary(ctx)
-		table = s.cluster.Table(ctx, kind, namespace, signals.Query)
+	if s.store != nil {
+		summary = s.store.Summary()
+		table = s.store.Table(kind, namespace, signals.Query)
 		var err error
-		namespaces, err = s.cluster.Namespaces(ctx)
+		namespaces, err = s.store.Namespaces()
 		if err != nil {
 			namespaceErr = err.Error()
 		}

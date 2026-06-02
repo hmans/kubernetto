@@ -22,15 +22,17 @@ func main() {
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	cluster, err := kube.NewCluster(*kubeconfig)
 	if err != nil {
 		logger.Warn("starting without a usable Kubernetes client", "error", err)
 	}
+	store := kube.NewResourceStore(cluster, logger)
+	store.Start(ctx)
 
-	app := server.New(cluster, logger)
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	app := server.New(cluster, store, logger)
 
 	srv := &http.Server{
 		Addr:              *addr,

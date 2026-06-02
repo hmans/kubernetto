@@ -37,3 +37,4 @@ go generate ./...
 - Namespace filtering for namespaced resources.
 - Client-side signals with server-rendered table fragments.
 - Search across visible table cells.
+- Shared informer-backed resource cache so page requests render from memory instead of issuing per-user Kubernetes list calls.
