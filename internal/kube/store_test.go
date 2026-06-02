@@ -306,6 +306,69 @@ func TestResourceStoreTableSortsBySelectedColumn(t *testing.T) {
 	}
 }
 
+func TestResourceStoreTableSortsResourceQuantitiesNumerically(t *testing.T) {
+	clientset := fake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "default"}},
+		testPod("tiny", "default", 0),
+		testPod("small", "default", 0),
+		testPod("large", "default", 0),
+		testPod("huge", "default", 0),
+	)
+	store := syncedTestStore(t, clientset)
+	metricsClient := metricsfake.NewSimpleClientset()
+	metricsClient.PrependReactor("list", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, &metricsv1beta1.PodMetricsList{
+			Items: []metricsv1beta1.PodMetrics{
+				testPodMetrics("tiny", "default", "37m", "736Ki"),
+				testPodMetrics("small", "default", "250m", "90.9Mi"),
+				testPodMetrics("large", "default", "1", "788Mi"),
+				testPodMetrics("huge", "default", "1500m", "1Gi"),
+			},
+		}, nil
+	})
+	if err := store.loadPodMetrics(context.Background(), metricsClient); err != nil {
+		t.Fatalf("load pod metrics: %v", err)
+	}
+
+	table := store.TableWithSort(KindPods, "default", "", "MEM", "asc")
+	if got := rowNames(table.Rows); !equalStrings(got, []string{"tiny", "small", "large", "huge"}) {
+		t.Fatalf("rows sorted by mem asc = %#v", got)
+	}
+	if got := table.Rows[1].Cells[8].Value; got != "90.9Mi" {
+		t.Fatalf("formatted mem = %q, want 90.9Mi", got)
+	}
+
+	table = store.TableWithSort(KindPods, "default", "", "MEM", "desc")
+	if got := rowNames(table.Rows); !equalStrings(got, []string{"huge", "large", "small", "tiny"}) {
+		t.Fatalf("rows sorted by mem desc = %#v", got)
+	}
+
+	table = store.TableWithSort(KindPods, "default", "", "CPU", "asc")
+	if got := rowNames(table.Rows); !equalStrings(got, []string{"tiny", "small", "large", "huge"}) {
+		t.Fatalf("rows sorted by cpu asc = %#v", got)
+	}
+}
+
+func TestResourceStoreTableSortsCountsNumerically(t *testing.T) {
+	clientset := fake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "default"}},
+		testPod("zero", "default", 0),
+		testPod("two", "default", 2),
+		testPod("ten", "default", 10),
+	)
+	store := syncedTestStore(t, clientset)
+
+	table := store.TableWithSort(KindPods, "default", "", "Restarts", "asc")
+	if got := rowNames(table.Rows); !equalStrings(got, []string{"zero", "two", "ten"}) {
+		t.Fatalf("rows sorted by restarts asc = %#v", got)
+	}
+
+	table = store.TableWithSort(KindPods, "default", "", "Restarts", "desc")
+	if got := rowNames(table.Rows); !equalStrings(got, []string{"ten", "two", "zero"}) {
+		t.Fatalf("rows sorted by restarts desc = %#v", got)
+	}
+}
+
 func syncedTestStore(t *testing.T, clientset *fake.Clientset) *ResourceStore {
 	t.Helper()
 
@@ -333,6 +396,34 @@ func rowNames(rows []Row) []string {
 		names = append(names, row.Name)
 	}
 	return names
+}
+
+func testPod(name, namespace string, restarts int32) *corev1.Pod {
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: name}}},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+			ContainerStatuses: []corev1.ContainerStatus{
+				{Name: name, Ready: true, RestartCount: restarts},
+			},
+		},
+	}
+}
+
+func testPodMetrics(name, namespace, cpu, memory string) metricsv1beta1.PodMetrics {
+	return metricsv1beta1.PodMetrics{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Containers: []metricsv1beta1.ContainerMetrics{
+			{
+				Name: name,
+				Usage: corev1.ResourceList{
+					corev1.ResourceCPU:    resource.MustParse(cpu),
+					corev1.ResourceMemory: resource.MustParse(memory),
+				},
+			},
+		},
+	}
 }
 
 func ptr[T any](value T) *T {

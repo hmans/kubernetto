@@ -8,7 +8,8 @@ const appCSS = `
   --bg: #f5f7f8;
   --panel: #ffffff;
   --panel-2: #eef2f5;
-  --text: #172026;
+  --text: #4a5962;
+  --text-strong: #172026;
   --muted: #687781;
   --line: #dce3e8;
   --accent: #0d9488;
@@ -19,13 +20,13 @@ const appCSS = `
   --shadow: 0 12px 34px rgba(23, 32, 38, .08);
   --field-bg: #ffffff;
   --table-head: #f9fbfc;
-  --cell-text: #25323a;
+  --cell-text: #53636c;
   --row-hover: #fbfcfd;
   --side-bg: #15252d;
   --side-panel: #20343d;
-  --side-text: #e8f1f4;
-  --side-strong: #ffffff;
-  --side-muted: #a8bac2;
+  --side-text: #c4d2d5;
+  --side-strong: #e2ecee;
+  --side-muted: #8fa3a2;
   --side-subtle: #89a0aa;
   --side-line: rgba(255,255,255,.14);
   --side-hover: rgba(255,255,255,.09);
@@ -43,8 +44,9 @@ const appCSS = `
     --bg: #101314;
     --panel: #171b1d;
     --panel-2: #202629;
-    --text: #eef3f2;
-    --muted: #9ba8a5;
+    --text: #a9b5b2;
+    --text-strong: #dce6e4;
+    --muted: #7f8d8a;
     --line: #2b3437;
     --accent: #2dd4bf;
     --accent-2: #67e8f9;
@@ -54,13 +56,13 @@ const appCSS = `
     --shadow: 0 16px 38px rgba(0, 0, 0, .22);
     --field-bg: #121617;
     --table-head: #1d2325;
-    --cell-text: #d7dfdd;
+    --cell-text: #a3afac;
     --row-hover: #1c2426;
     --side-bg: #0d1719;
     --side-panel: #162629;
-    --side-text: #e8f1f4;
-    --side-strong: #ffffff;
-    --side-muted: #96aaa9;
+    --side-text: #c4d2d5;
+    --side-strong: #e2ecee;
+    --side-muted: #879b9a;
     --side-subtle: #7f9699;
     --side-line: rgba(255,255,255,.12);
     --side-hover: rgba(255,255,255,.08);
@@ -78,8 +80,9 @@ const appCSS = `
   --bg: #101314;
   --panel: #171b1d;
   --panel-2: #202629;
-  --text: #eef3f2;
-  --muted: #9ba8a5;
+  --text: #a9b5b2;
+  --text-strong: #dce6e4;
+  --muted: #7f8d8a;
   --line: #2b3437;
   --accent: #2dd4bf;
   --accent-2: #67e8f9;
@@ -89,13 +92,13 @@ const appCSS = `
   --shadow: 0 16px 38px rgba(0, 0, 0, .22);
   --field-bg: #121617;
   --table-head: #1d2325;
-  --cell-text: #d7dfdd;
+  --cell-text: #a3afac;
   --row-hover: #1c2426;
   --side-bg: #0d1719;
   --side-panel: #162629;
-  --side-text: #e8f1f4;
-  --side-strong: #ffffff;
-  --side-muted: #96aaa9;
+  --side-text: #c4d2d5;
+  --side-strong: #e2ecee;
+  --side-muted: #879b9a;
   --side-subtle: #7f9699;
   --side-line: rgba(255,255,255,.12);
   --side-hover: rgba(255,255,255,.08);
@@ -175,7 +178,7 @@ button, input, select { font: inherit; }
   border: 1px solid var(--side-line);
   border-radius: 7px;
   background: var(--side-panel);
-  color: #fff;
+  color: var(--side-text);
   padding: 0 8px;
   outline: none;
 }
@@ -186,7 +189,7 @@ button, input, select { font: inherit; }
   border: 0;
   border-radius: 7px;
   background: transparent;
-  color: #cfe0e5;
+  color: var(--side-text);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -195,10 +198,10 @@ button, input, select { font: inherit; }
   cursor: pointer;
   text-align: left;
 }
-.nav button:hover, .nav button[aria-pressed="true"] { background: var(--side-hover); color: #fff; }
+.nav button:hover, .nav button[aria-pressed="true"] { background: var(--side-hover); color: var(--side-strong); }
 .main { min-width: 0; padding: 20px 24px 28px; display: grid; gap: 18px; align-content: start; }
 .topbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.topbar h1 { margin: 0; font-size: 22px; line-height: 1.1; }
+.topbar h1 { margin: 0; color: var(--text-strong); font-size: 22px; line-height: 1.1; }
 .topbar-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: flex-end; }
 .updated { color: var(--muted); font-size: 12px; white-space: nowrap; }
 .theme-switcher {
@@ -221,10 +224,10 @@ button, input, select { font: inherit; }
   cursor: pointer;
   padding: 0 9px;
 }
-.theme-switcher button:hover { color: var(--text); }
+.theme-switcher button:hover { color: var(--text-strong); }
 .theme-switcher button[aria-pressed="true"] {
   background: var(--panel);
-  color: var(--text);
+  color: var(--text-strong);
   box-shadow: 0 1px 2px rgba(0,0,0,.08);
 }
 .theme-switcher button:focus-visible {
@@ -246,6 +249,7 @@ button, input, select { font: inherit; }
 }
 .metric .label { color: var(--muted); font-size: 12px; }
 .metric .value {
+  color: var(--text-strong);
   font-weight: 760;
   font-size: 22px;
   line-height: 1.15;
@@ -311,7 +315,7 @@ button, input, select { font: inherit; }
   padding: 14px 16px;
   border-bottom: 1px solid var(--line);
 }
-.table-head h2 { margin: 0; font-size: 16px; line-height: 1.2; }
+.table-head h2 { margin: 0; color: var(--text-strong); font-size: 16px; line-height: 1.2; }
 .table-wrap { overflow: auto; }
 table { width: 100%; border-collapse: collapse; min-width: 760px; }
 th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
@@ -358,6 +362,7 @@ tbody tr[data-selected="true"] td {
   background: var(--status-neutral-bg);
   border-bottom-color: var(--accent);
 }
+tbody tr:hover .primary, tbody tr[data-selected="true"] .primary { color: var(--text-strong); }
 .primary { font-weight: 690; color: var(--text); }
 td.status { color: inherit; background: transparent; }
 td.status > span {
@@ -399,7 +404,7 @@ td.status.neutral > span { background: var(--status-neutral-bg); color: var(--ac
 }
 .detail-empty h2 {
   margin: 0 0 6px;
-  color: var(--text);
+  color: var(--text-strong);
   font-size: 16px;
 }
 .detail-empty p { margin: 0; }
@@ -422,6 +427,7 @@ td.status.neutral > span { background: var(--status-neutral-bg); color: var(--ac
 }
 .detail-title h2 {
   margin: 0;
+  color: var(--text-strong);
   font-size: 18px;
   line-height: 1.2;
   overflow-wrap: anywhere;
@@ -539,7 +545,7 @@ td.status.neutral > span { background: var(--status-neutral-bg); color: var(--ac
 }
 .event-head span:first-child {
   font-weight: 720;
-  color: var(--text);
+  color: var(--text-strong);
 }
 .event-head span:last-child,
 .event-meta {
@@ -577,6 +583,30 @@ td.status.neutral > span { background: var(--status-neutral-bg); color: var(--ac
 const appJS = `
 const themeKey = "kubernetto-theme";
 const themeOptions = new Set(["auto", "light", "dark"]);
+const urlStateKeys = [
+  "context",
+  "resource",
+  "namespace",
+  "query",
+  "sortColumn",
+  "sortOrder",
+  "selectedName",
+  "selectedNamespace",
+  "detailMode",
+];
+const defaultUrlState = {
+  context: "",
+  resource: "pods",
+  namespace: "",
+  query: "",
+  sortColumn: "",
+  sortOrder: "",
+  selectedName: "",
+  selectedNamespace: "",
+  detailMode: "overview",
+};
+let urlSyncTimer = 0;
+let querySyncTimer = 0;
 
 function savedTheme() {
   try {
@@ -593,6 +623,128 @@ function applyTheme(theme) {
   for (const button of document.querySelectorAll("[data-theme-option]")) {
     button.setAttribute("aria-pressed", String(button.dataset.themeOption === nextTheme));
   }
+}
+
+function readUrlState() {
+  const params = new URLSearchParams(window.location.search);
+  const state = { ...defaultUrlState };
+  for (const key of urlStateKeys) {
+    const value = params.get(key);
+    if (value !== null) {
+      state[key] = value;
+    }
+  }
+  return normalizeUrlState(state);
+}
+
+function readDOMState() {
+  const state = {};
+  const context = document.querySelector("#context");
+  const namespace = document.querySelector("#namespace");
+  const query = document.querySelector("#query");
+  const activeResource = document.querySelector("[data-resource-kind][aria-pressed='true']");
+  const activeSort = document.querySelector("th[aria-sort='ascending'] [data-sort-column], th[aria-sort='descending'] [data-sort-column]");
+  const selectedRow = document.querySelector("tr[data-selected='true'][data-row-name]");
+  const activeDetailMode = document.querySelector("[data-detail-mode][aria-selected='true']");
+
+  if (context) {
+    state.context = context.value;
+  }
+  if (namespace && !namespace.disabled) {
+    state.namespace = namespace.value;
+  } else if (namespace && namespace.disabled) {
+    state.namespace = "";
+  }
+  if (query) {
+    state.query = query.value;
+  }
+  if (activeResource) {
+    state.resource = activeResource.dataset.resourceKind || "";
+  }
+  if (activeSort) {
+    state.sortColumn = activeSort.dataset.sortColumn || "";
+    state.sortOrder = activeSort.closest("th")?.getAttribute("aria-sort") === "descending" ? "desc" : "asc";
+  } else {
+    state.sortColumn = "";
+    state.sortOrder = "";
+  }
+  if (selectedRow) {
+    state.selectedName = selectedRow.dataset.rowName || "";
+    state.selectedNamespace = selectedRow.dataset.rowNamespace || "";
+  }
+  if (activeDetailMode) {
+    state.detailMode = activeDetailMode.dataset.detailMode || "overview";
+  }
+
+  return normalizeUrlState(state);
+}
+
+function normalizeUrlState(state) {
+  const next = { ...defaultUrlState, ...state };
+  if (next.sortOrder !== "asc" && next.sortOrder !== "desc") {
+    next.sortColumn = "";
+    next.sortOrder = "";
+  }
+  if (!next.sortColumn) {
+    next.sortOrder = "";
+  }
+  if (next.detailMode !== "events" && next.detailMode !== "yaml") {
+    next.detailMode = "overview";
+  }
+  if (!next.selectedName) {
+    next.selectedNamespace = "";
+    next.detailMode = "overview";
+  }
+  if (!next.resource) {
+    next.resource = defaultUrlState.resource;
+  }
+  return next;
+}
+
+function writeUrlState(state) {
+  if (!window.history?.replaceState) {
+    return;
+  }
+  const nextState = normalizeUrlState(state);
+  const url = new URL(window.location.href);
+  for (const key of urlStateKeys) {
+    url.searchParams.delete(key);
+  }
+  for (const key of urlStateKeys) {
+    const value = nextState[key] || "";
+    if (value && !(key === "detailMode" && value === defaultUrlState.detailMode)) {
+      url.searchParams.set(key, value);
+    }
+  }
+  const nextURL = url.pathname + url.search + url.hash;
+  if (nextURL !== window.location.pathname + window.location.search + window.location.hash) {
+    window.history.replaceState(null, "", nextURL);
+  }
+}
+
+function syncUrlState(patch = {}) {
+  writeUrlState({ ...readUrlState(), ...readDOMState(), ...patch });
+}
+
+function scheduleUrlSync(patch = {}, delay = 0) {
+  window.clearTimeout(urlSyncTimer);
+  urlSyncTimer = window.setTimeout(() => syncUrlState(patch), delay);
+}
+
+function currentSortState() {
+  const state = { ...readUrlState(), ...readDOMState() };
+  return { column: state.sortColumn || "", order: state.sortOrder || "" };
+}
+
+function nextSortState(column) {
+  const current = currentSortState();
+  if (current.column !== column) {
+    return { sortColumn: column, sortOrder: "asc" };
+  }
+  if (current.order === "asc") {
+    return { sortColumn: column, sortOrder: "desc" };
+  }
+  return { sortColumn: "", sortOrder: "" };
 }
 
 applyTheme(savedTheme());
@@ -612,7 +764,127 @@ document.addEventListener("click", (event) => {
   applyTheme(nextTheme);
 });
 
-document.addEventListener("DOMContentLoaded", () => applyTheme(savedTheme()));
+document.addEventListener("click", (event) => {
+  const resourceButton = event.target.closest("[data-resource-kind]");
+  if (resourceButton) {
+    const patch = {
+      resource: resourceButton.dataset.resourceKind || defaultUrlState.resource,
+      sortColumn: "",
+      sortOrder: "",
+      selectedName: "",
+      selectedNamespace: "",
+      detailMode: "overview",
+    };
+    if (resourceButton.dataset.resourceScope === "cluster") {
+      patch.namespace = "";
+    }
+    syncUrlState({
+      ...patch,
+    });
+    return;
+  }
+
+  const sortButton = event.target.closest("[data-sort-column]");
+  if (sortButton) {
+    syncUrlState({
+      ...nextSortState(sortButton.dataset.sortColumn || ""),
+      selectedName: "",
+      selectedNamespace: "",
+      detailMode: "overview",
+    });
+    return;
+  }
+
+  const row = event.target.closest("tr[data-row-name]");
+  if (row) {
+    syncUrlState({
+      selectedName: row.dataset.rowName || "",
+      selectedNamespace: row.dataset.rowNamespace || "",
+      detailMode: "overview",
+    });
+    return;
+  }
+
+  if (event.target.closest("[data-close-detail]")) {
+    syncUrlState({ selectedName: "", selectedNamespace: "", detailMode: "overview" });
+    return;
+  }
+
+  const detailModeButton = event.target.closest("[data-detail-mode]");
+  if (detailModeButton) {
+    syncUrlState({ detailMode: detailModeButton.dataset.detailMode || "overview" });
+    return;
+  }
+
+  scheduleUrlSync({}, 50);
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") {
+    return;
+  }
+  const row = event.target.closest("tr[data-row-name]");
+  if (!row) {
+    return;
+  }
+  syncUrlState({
+    selectedName: row.dataset.rowName || "",
+    selectedNamespace: row.dataset.rowNamespace || "",
+    detailMode: "overview",
+  });
+});
+
+document.addEventListener("change", (event) => {
+  if (event.target.matches("#context")) {
+    syncUrlState({
+      context: event.target.value,
+      namespace: "",
+      sortColumn: "",
+      sortOrder: "",
+      selectedName: "",
+      selectedNamespace: "",
+      detailMode: "overview",
+    });
+  } else if (event.target.matches("#namespace")) {
+    syncUrlState({
+      namespace: event.target.value,
+      selectedName: "",
+      selectedNamespace: "",
+      detailMode: "overview",
+    });
+  }
+});
+
+document.addEventListener("input", (event) => {
+  if (!event.target.matches("#query")) {
+    return;
+  }
+  window.clearTimeout(querySyncTimer);
+  querySyncTimer = window.setTimeout(() => {
+    syncUrlState({
+      query: event.target.value,
+      selectedName: "",
+      selectedNamespace: "",
+      detailMode: "overview",
+    });
+  }, 250);
+});
+
+document.addEventListener("DOMContentLoaded", () => {
+  applyTheme(savedTheme());
+  syncUrlState();
+
+  const app = document.querySelector(".app");
+  if (app) {
+    const observer = new MutationObserver(() => scheduleUrlSync({}, 50));
+    observer.observe(app, {
+      attributes: true,
+      childList: true,
+      subtree: true,
+      attributeFilter: ["aria-pressed", "aria-selected", "aria-sort", "data-selected", "disabled"],
+    });
+  }
+});
 `
 
 func (s *Server) handleStyles(w http.ResponseWriter, _ *http.Request) {
