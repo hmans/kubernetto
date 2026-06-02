@@ -69,6 +69,7 @@ type Table struct {
 
 type Row struct {
 	Name      string
+	Namespace string
 	Cells     []Cell
 	Status    string
 	StatusKey string
@@ -77,6 +78,44 @@ type Row struct {
 type Cell struct {
 	Value string
 	Class string
+}
+
+type ResourceDetail struct {
+	Kind        ResourceKind
+	Label       string
+	Name        string
+	Namespace   string
+	Status      string
+	StatusKey   string
+	Age         string
+	CreatedAt   time.Time
+	UID         string
+	Error       string
+	YAML        string
+	Events      []ResourceEvent
+	Fields      []DetailField
+	Sections    []DetailSection
+	Labels      []DetailField
+	Annotations []DetailField
+}
+
+type ResourceEvent struct {
+	Type     string
+	Reason   string
+	Message  string
+	Count    int32
+	Age      string
+	LastSeen time.Time
+}
+
+type DetailSection struct {
+	Title  string
+	Fields []DetailField
+}
+
+type DetailField struct {
+	Name  string
+	Value string
 }
 
 func NormalizeKind(kind string) ResourceKind {
@@ -292,6 +331,7 @@ func podRow(pod corev1.Pod) Row {
 	}
 	return Row{
 		Name:      pod.Name,
+		Namespace: pod.Namespace,
 		Status:    status,
 		StatusKey: healthKey(status == "Running" && ready == total),
 		Cells: []Cell{
@@ -314,6 +354,7 @@ func deploymentRow(deployment appsv1.Deployment) Row {
 	healthy := deployment.Status.ReadyReplicas == desired && deployment.Status.UpdatedReplicas == desired
 	return Row{
 		Name:      deployment.Name,
+		Namespace: deployment.Namespace,
 		Status:    fmt.Sprintf("%d/%d", deployment.Status.ReadyReplicas, desired),
 		StatusKey: healthKey(healthy),
 		Cells: []Cell{
@@ -336,6 +377,7 @@ func statefulSetRow(statefulSet appsv1.StatefulSet) Row {
 	healthy := statefulSet.Status.ReadyReplicas == *desired
 	return Row{
 		Name:      statefulSet.Name,
+		Namespace: statefulSet.Namespace,
 		Status:    fmt.Sprintf("%d/%d", statefulSet.Status.ReadyReplicas, *desired),
 		StatusKey: healthKey(healthy),
 		Cells: []Cell{
@@ -352,6 +394,7 @@ func daemonSetRow(daemonSet appsv1.DaemonSet) Row {
 	healthy := daemonSet.Status.NumberReady == daemonSet.Status.DesiredNumberScheduled
 	return Row{
 		Name:      daemonSet.Name,
+		Namespace: daemonSet.Namespace,
 		Status:    fmt.Sprintf("%d/%d", daemonSet.Status.NumberReady, daemonSet.Status.DesiredNumberScheduled),
 		StatusKey: healthKey(healthy),
 		Cells: []Cell{
@@ -368,6 +411,7 @@ func daemonSetRow(daemonSet appsv1.DaemonSet) Row {
 func serviceRow(service corev1.Service) Row {
 	return Row{
 		Name:      service.Name,
+		Namespace: service.Namespace,
 		Status:    string(service.Spec.Type),
 		StatusKey: "neutral",
 		Cells: []Cell{
@@ -388,6 +432,7 @@ func ingressRow(ingress networkingv1.Ingress) Row {
 	}
 	return Row{
 		Name:      ingress.Name,
+		Namespace: ingress.Namespace,
 		Status:    "Ingress",
 		StatusKey: "neutral",
 		Cells: []Cell{
