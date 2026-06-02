@@ -62,7 +62,7 @@ templ Page(state PageState) {
 						@NamespacePickerView(state)
 						<div class="field">
 							<label for="query">Search</label>
-							<input id="query" type="search" placeholder="Filter visible fields" { searchInputAttrs()... }/>
+							<input id="query" type="search" value={ state.Signals.Query } placeholder="Filter visible fields" { searchInputAttrs()... }/>
 						</div>
 						<button class="icon-button" type="button" title="Refresh" { refreshButtonAttrs()... }>↻</button>
 					</section>
