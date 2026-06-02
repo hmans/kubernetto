@@ -1,6 +1,7 @@
 package kube
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -37,6 +38,7 @@ func (s *ResourceStore) Overview() ClusterOverview {
 	daemonSets := s.listDaemonSets("")
 	warningEvents := s.recentWarningEvents(6)
 	usage := s.totalPodUsage()
+	overview.Metrics, overview.PodUsage = s.podUsageTimelinesForOverview(8)
 	allocatable := nodeAllocatable(nodes)
 
 	readyNodes := 0
@@ -157,6 +159,104 @@ func usageMetrics(usage, allocatable corev1.ResourceList) []OverviewMetric {
 		usageMetric("CPU", usage, allocatable, corev1.ResourceCPU),
 		usageMetric("Memory", usage, allocatable, corev1.ResourceMemory),
 	}
+}
+
+func (s *ResourceStore) podUsageTimelinesForOverview(limit int) (MetricsState, []PodUsageGraph) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if timelines, target, err := s.loadPrometheusTimelines(ctx); err == nil {
+		return MetricsState{
+			Available: true,
+			Message:   "Prometheus is reporting pod usage.",
+			Source:    "Prometheus " + target.Namespace + "/" + target.Service,
+			Window:    "Last 60 minutes",
+			UpdatedAt: time.Now(),
+		}, s.topPodUsageFromTimelines(timelines, limit)
+	}
+
+	state := s.podMetricsState()
+	if state.Source == "" && state.Available {
+		state.Source = "metrics.k8s.io"
+	}
+	return state, s.topPodUsageFromTimelines(s.podUsageHistoryMap(), limit)
+}
+
+func (s *ResourceStore) topPodUsageFromTimelines(timelines map[string][]UsageSample, limit int) []PodUsageGraph {
+	pods := s.listPods("")
+	items := make([]podUsageValue, 0, len(pods))
+	for _, pod := range pods {
+		samples := timelines[podKey(pod.Namespace, pod.Name)]
+		latest, ok := latestUsageSample(samples)
+		if !ok {
+			continue
+		}
+		cpu := latest.CPU
+		memory := latest.Memory
+		if cpu == 0 && memory == 0 {
+			continue
+		}
+		items = append(items, podUsageValue{
+			name:      pod.Name,
+			namespace: pod.Namespace,
+			cpu:       cpu,
+			memory:    memory,
+			cpuValue:  cpuMilliValue(cpu),
+			memValue:  byteValue(memory),
+			samples:   samples,
+		})
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].cpu == items[j].cpu {
+			if items[i].memory == items[j].memory {
+				return strings.ToLower(items[i].name) < strings.ToLower(items[j].name)
+			}
+			return items[i].memory > items[j].memory
+		}
+		return items[i].cpu > items[j].cpu
+	})
+	if limit > 0 && len(items) > limit {
+		items = items[:limit]
+	}
+	out := make([]PodUsageGraph, 0, len(items))
+	for _, item := range items {
+		out = append(out, PodUsageGraph{
+			Name:      item.name,
+			Namespace: item.namespace,
+			CPU:       item.cpuValue,
+			Memory:    item.memValue,
+			Samples:   item.samples,
+		})
+	}
+	return out
+}
+
+type podUsageValue struct {
+	name      string
+	namespace string
+	cpu       int64
+	memory    int64
+	cpuValue  string
+	memValue  string
+	samples   []UsageSample
+}
+
+func latestUsageSample(samples []UsageSample) (UsageSample, bool) {
+	for i := len(samples) - 1; i >= 0; i-- {
+		if samples[i].CPU != 0 || samples[i].Memory != 0 {
+			return samples[i], true
+		}
+	}
+	return UsageSample{}, false
+}
+
+func cpuMilliValue(milli int64) string {
+	if milli == 0 {
+		return "-"
+	}
+	if milli%1000 == 0 {
+		return fmt.Sprintf("%d", milli/1000)
+	}
+	return fmt.Sprintf("%dm", milli)
 }
 
 func usageMetric(label string, usage, allocatable corev1.ResourceList, name corev1.ResourceName) OverviewMetric {

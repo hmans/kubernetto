@@ -1,6 +1,7 @@
 package kube
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -31,7 +32,7 @@ func (s *ResourceStore) Detail(kind ResourceKind, namespace, name string) Resour
 			detail.Error = err.Error()
 			return detail
 		}
-		return s.withEvents(podDetail(*pod))
+		return s.withEvents(s.withPodUsage(podDetail(*pod), pod.Namespace, pod.Name))
 	case KindDeployments:
 		deployment, err := s.deployments.Deployments(namespace).Get(name)
 		if err != nil {
@@ -85,6 +86,51 @@ func (s *ResourceStore) Detail(kind ResourceKind, namespace, name string) Resour
 		detail.Error = "Unsupported resource kind."
 		return detail
 	}
+}
+
+func (s *ResourceStore) withPodUsage(detail ResourceDetail, namespace, name string) ResourceDetail {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	timeline, _, err := s.loadPrometheusPodTimeline(ctx, namespace, name)
+	if err != nil || len(timeline) == 0 {
+		timeline = s.podUsageTimelineFor(namespace, name)
+	}
+	latest, ok := latestUsageSample(timeline)
+	if !ok {
+		usage := s.podUsageFor(namespace, name)
+		if len(usage) == 0 {
+			return detail
+		}
+		latest = UsageSample{
+			Timestamp: time.Now(),
+		}
+		if cpu := usage[corev1.ResourceCPU]; !cpu.IsZero() {
+			latest.CPU = cpu.MilliValue()
+		}
+		if memory := usage[corev1.ResourceMemory]; !memory.IsZero() {
+			latest.Memory = memory.Value()
+		}
+		timeline = []UsageSample{latest}
+	}
+	if latest.CPU == 0 && latest.Memory == 0 {
+		return detail
+	}
+	detail.Usage = usageGraphs(
+		UsageGraph{Label: "CPU", Value: cpuMilliValue(latest.CPU)},
+		UsageGraph{Label: "Memory", Value: byteValue(latest.Memory)},
+	)
+	detail.UsageTimeline = timeline
+	return detail
+}
+
+func usageGraphs(graphs ...UsageGraph) []UsageGraph {
+	out := make([]UsageGraph, 0, len(graphs))
+	for _, graph := range graphs {
+		if graph.Value != "" && graph.Value != "-" {
+			out = append(out, graph)
+		}
+	}
+	return out
 }
 
 func podDetail(pod corev1.Pod) ResourceDetail {
