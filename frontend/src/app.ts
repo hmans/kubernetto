@@ -276,6 +276,39 @@ document.addEventListener("click", (event) => {
   if (!target) {
     return;
   }
+  const fleetButton = target.closest<HTMLElement>("[data-fleet-context]");
+  if (fleetButton) {
+    const context = fleetButton.dataset.fleetContext || "";
+    if (fleetButton.dataset.fleetIssue === "true") {
+      syncUrlState({
+        context,
+        clusters: context,
+        resource: fleetButton.dataset.fleetIssueKind || defaultUrlState.resource,
+        namespace: "",
+        query: fleetButton.dataset.fleetIssueQuery || "",
+        sortColumn: "",
+        sortOrder: "",
+        selectedName: "",
+        selectedNamespace: "",
+        detailMode: "overview",
+      }, { mode: "push" });
+    } else {
+      syncUrlState({
+        context,
+        clusters: context,
+        resource: defaultUrlState.resource,
+        namespace: "",
+        query: "",
+        sortColumn: "",
+        sortOrder: "",
+        selectedName: "",
+        selectedNamespace: "",
+        detailMode: "overview",
+      }, { mode: "push" });
+    }
+    return;
+  }
+
   const resourceButton = target.closest<HTMLElement>("[data-resource-kind]");
   if (resourceButton) {
     applyOptimisticResourceNav(resourceButton);

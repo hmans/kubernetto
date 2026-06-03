@@ -26,11 +26,40 @@ type PageState struct {
 	Resources      []kube.ResourceDef
 	Signals        Signals
 	Summary        kube.Summary
+	Fleet          FleetOverview
 	Overview       kube.ClusterOverview
 	Table          kube.Table
 	Detail         kube.ResourceDetail
 	Namespaces     []string
 	NamespaceErr   string
+}
+
+type FleetOverview struct {
+	UpdatedAt     time.Time
+	Clusters      []FleetCluster
+	WarningEvents []FleetWarningEvent
+}
+
+type FleetCluster struct {
+	Context      string
+	Name         string
+	StatusKey    string
+	Detail       string
+	TopConcern   string
+	IssueKind    kube.ResourceKind
+	IssueQuery   string
+	IssueLabel   string
+	Nodes        kube.OverviewMetric
+	Pods         kube.OverviewMetric
+	Workloads    kube.OverviewMetric
+	CPU          kube.OverviewMetric
+	Memory       kube.OverviewMetric
+	WarningCount int
+}
+
+type FleetWarningEvent struct {
+	Cluster string
+	Event   kube.OverviewEvent
 }
 
 type ResourceNavGroup struct {
@@ -441,6 +470,10 @@ func namespaceSelectAttrs() templ.Attributes {
 
 func clusterFilterAttrs(cluster *kube.Cluster, state PageState) templ.Attributes {
 	active := clusterActive(cluster.ContextName, selectedClusterContexts(state.Signals.Clusters))
+	endpoint := "/ui/table"
+	if isOverview(state) {
+		endpoint = "/ui/refresh"
+	}
 	return templ.Attributes{
 		"type":                   "button",
 		"class":                  clusterFilterClass(active),
@@ -448,7 +481,7 @@ func clusterFilterAttrs(cluster *kube.Cluster, state PageState) templ.Attributes
 		"data-cluster-context":   cluster.ContextName,
 		"data-cluster-selection": toggledClusters(cluster.ContextName, state),
 		"data-indicator:loading": true,
-		"data-on:click":          "$clusters = " + signalLiteral(toggledClusters(cluster.ContextName, state)) + "; $selectedName = ''; $selectedNamespace = ''; $detailMode = 'overview'; @get('/ui/table')",
+		"data-on:click":          "$clusters = " + signalLiteral(toggledClusters(cluster.ContextName, state)) + "; $selectedName = ''; $selectedNamespace = ''; $detailMode = 'overview'; @get('" + endpoint + "')",
 	}
 }
 
@@ -492,6 +525,40 @@ func selectedClusterContexts(value string) []string {
 		}
 	}
 	return values
+}
+
+func fleetClusterCardClass(cluster FleetCluster) string {
+	return "fleet-cluster-card " + cluster.StatusKey
+}
+
+func fleetClusterOverviewAttrs(cluster FleetCluster) templ.Attributes {
+	return templ.Attributes{
+		"type":                   "button",
+		"class":                  "fleet-card-overview",
+		"data-fleet-context":     cluster.Context,
+		"data-indicator:loading": true,
+		"data-on:click":          "$context = " + signalLiteral(cluster.Context) + "; $clusters = " + signalLiteral(cluster.Context) + "; $resource = 'overview'; $query = ''; $sortColumn = ''; $sortOrder = ''; $selectedName = ''; $selectedNamespace = ''; $detailMode = 'overview'; @get('/ui/refresh')",
+	}
+}
+
+func fleetClusterIssueAttrs(cluster FleetCluster) templ.Attributes {
+	return templ.Attributes{
+		"type":                   "button",
+		"class":                  "fleet-card-action",
+		"data-fleet-context":     cluster.Context,
+		"data-fleet-issue":       "true",
+		"data-fleet-issue-kind":  string(cluster.IssueKind),
+		"data-fleet-issue-query": cluster.IssueQuery,
+		"data-indicator:loading": true,
+		"data-on:click":          "$context = " + signalLiteral(cluster.Context) + "; $clusters = " + signalLiteral(cluster.Context) + "; $resource = " + signalLiteral(string(cluster.IssueKind)) + "; $namespace = ''; $query = " + signalLiteral(cluster.IssueQuery) + "; $sortColumn = ''; $sortOrder = ''; $selectedName = ''; $selectedNamespace = ''; $detailMode = 'overview'; @get('/ui/table')",
+	}
+}
+
+func fleetMetricValue(metric kube.OverviewMetric) string {
+	if metric.Value == "" {
+		return "0"
+	}
+	return metric.Value
 }
 
 func searchInputAttrs() templ.Attributes {

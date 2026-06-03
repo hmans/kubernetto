@@ -4,13 +4,21 @@ import "fmt"
 
 templ OverviewView(state PageState) {
 	<section class="grid min-w-0 gap-3.5" aria-label="Cluster overview">
-		<div class="flex items-center justify-between gap-3 rounded-lg border border-[var(--line)] bg-[var(--panel)] px-4 py-3.5 shadow-[var(--shadow)]">
+		<div class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--line)] bg-[var(--panel)] px-4 py-3.5 shadow-[var(--shadow)]">
 			<div>
-				<h2 class="m-0 text-base leading-[1.2] text-[var(--text-strong)]">Cluster Overview</h2>
-				<div class="updated">{ fmt.Sprintf("updated %s", formatClock(state.Overview.UpdatedAt)) }</div>
+				if len(state.Fleet.Clusters) > 1 {
+					<h2 class="m-0 text-base leading-[1.2] text-[var(--text-strong)]">Fleet Overview</h2>
+					<div class="updated">{ fmt.Sprintf("%d clusters · updated %s", len(state.Fleet.Clusters), formatClock(state.Fleet.UpdatedAt)) }</div>
+				} else {
+					<h2 class="m-0 text-base leading-[1.2] text-[var(--text-strong)]">Cluster Overview</h2>
+					<div class="updated">{ fmt.Sprintf("updated %s", formatClock(state.Overview.UpdatedAt)) }</div>
+				}
 			</div>
+			@ClusterFilterView(state)
 		</div>
-		if state.Overview.Error != "" {
+		if len(state.Fleet.Clusters) > 1 {
+			@FleetOverviewView(state)
+		} else if state.Overview.Error != "" {
 			<div class="notice danger">{ state.Overview.Error }</div>
 		} else {
 			<div class="overview-stats grid grid-cols-[repeat(3,minmax(220px,1fr))] gap-3 max-[860px]:grid-cols-1">
@@ -99,6 +107,95 @@ templ OverviewView(state PageState) {
 					</div>
 				}
 			</section>
+		}
+	</section>
+}
+
+templ FleetOverviewView(state PageState) {
+	<section class="fleet-grid" aria-label="Cluster health">
+		for _, cluster := range state.Fleet.Clusters {
+			<article class={ fleetClusterCardClass(cluster) }>
+				<button { fleetClusterOverviewAttrs(cluster)... }>
+					<div class="fleet-card-head">
+						<div class="min-w-0">
+							<div class="fleet-cluster-name">{ cluster.Name }</div>
+							<div class="updated">{ cluster.Context }</div>
+						</div>
+						<span class={ "status-pill " + cluster.StatusKey }>{ cluster.TopConcern }</span>
+					</div>
+					if cluster.Detail != "" {
+						<div class="fleet-concern">{ cluster.Detail }</div>
+					}
+					<div class="fleet-metrics">
+						<div>
+							<span>Nodes</span>
+							<strong>{ fleetMetricValue(cluster.Nodes) }</strong>
+						</div>
+						<div>
+							<span>Pods</span>
+							<strong>{ fleetMetricValue(cluster.Pods) }</strong>
+						</div>
+						<div>
+							<span>Workloads</span>
+							<strong>{ fleetMetricValue(cluster.Workloads) }</strong>
+						</div>
+						<div>
+							<span>Warnings</span>
+							<strong>{ fmt.Sprint(cluster.WarningCount) }</strong>
+						</div>
+						<div>
+							<span>CPU</span>
+							<strong>{ fleetMetricValue(cluster.CPU) }</strong>
+						</div>
+						<div>
+							<span>Memory</span>
+							<strong>{ fleetMetricValue(cluster.Memory) }</strong>
+						</div>
+					</div>
+				</button>
+				if cluster.IssueKind != "" {
+					<button { fleetClusterIssueAttrs(cluster)... }>
+						<span class="icon-[lucide--search]" aria-hidden="true"></span>
+						<span>{ cluster.IssueLabel }</span>
+					</button>
+				}
+			</article>
+		}
+	</section>
+	<section class="min-w-0 overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--panel)] shadow-[var(--shadow)]">
+		<div class="flex min-h-12 items-center justify-between gap-3 border-b border-[var(--line)] px-3.5 py-3">
+			<h3 class="m-0 text-base leading-[1.2] text-[var(--text-strong)]">Needs Attention</h3>
+			<button class="inline-flex cursor-pointer items-center gap-1.5 border-0 bg-transparent text-xs font-[680] text-[var(--accent-2)]" { overviewRefreshAttrs()... }>
+				<span class="icon-[lucide--refresh-cw]" aria-hidden="true"></span>
+				<span>Refresh</span>
+			</button>
+		</div>
+		if len(state.Fleet.WarningEvents) == 0 {
+			<div class="empty">No recent warning events are cached across active clusters.</div>
+		} else {
+			<div class="event-list overview-events">
+				for _, item := range state.Fleet.WarningEvents {
+					<article class="event-item warning">
+						<div class="flex items-center justify-between gap-2">
+							<span class="font-[720] text-[var(--text-strong)]">{ item.Event.Reason }</span>
+							<span class="text-[11px] text-[var(--muted)]">{ item.Event.Age }</span>
+						</div>
+						<p>{ item.Event.Message }</p>
+						<div class="flex flex-wrap items-center justify-start gap-2 text-[11px] text-[var(--muted)]">
+							<span>{ item.Cluster }</span>
+							if item.Event.InvolvedObject != "" {
+								<span>{ item.Event.InvolvedObject }</span>
+							}
+							if item.Event.Namespace != "" {
+								<span>{ item.Event.Namespace }</span>
+							}
+							if item.Event.Count > 1 {
+								<span>{ fmt.Sprintf("%d times", item.Event.Count) }</span>
+							}
+						</div>
+					</article>
+				}
+			</div>
 		}
 	</section>
 }

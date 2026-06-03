@@ -254,8 +254,15 @@ func (s *Server) state(signals ui.Signals) ui.PageState {
 	}
 	activeContexts := s.activeContexts(signals.Clusters)
 	signals.Clusters = strings.Join(s.selectedContexts(signals.Clusters), ",")
+	if kind == kube.KindOverview && len(activeContexts) == 1 {
+		session = s.session(activeContexts[0])
+		if session != nil && session.cluster != nil {
+			contextName = session.cluster.ContextName
+		}
+	}
 
 	summary := kube.Summary{UpdatedAt: time.Now(), Error: "No Kubernetes client is configured."}
+	fleet := ui.FleetOverview{UpdatedAt: time.Now()}
 	overview := kube.ClusterOverview{UpdatedAt: time.Now(), Error: "No Kubernetes client is configured."}
 	table := kube.Table{Kind: kind, Label: def.Label, Namespace: namespace, Query: signals.Query, SortColumn: signals.SortColumn, SortOrder: signals.SortOrder, UpdatedAt: time.Now(), Namespaced: def.Scope == "namespaced"}
 	detail := kube.ResourceDetail{Kind: kind, Label: def.Label, Name: signals.SelectedName, Namespace: selectedNamespace}
@@ -264,6 +271,7 @@ func (s *Server) state(signals ui.Signals) ui.PageState {
 
 	if session != nil && session.store != nil {
 		summary = s.summary(activeContexts)
+		fleet = s.fleetOverview(activeContexts)
 		overview = session.store.Overview()
 		if kind != kube.KindOverview {
 			table = s.table(kind, namespace, signals.Query, signals.SortColumn, signals.SortOrder, activeContexts)
@@ -283,6 +291,7 @@ func (s *Server) state(signals ui.Signals) ui.PageState {
 		Resources:      kube.ResourceDefs,
 		Signals:        ui.Signals{Context: contextName, Clusters: signals.Clusters, Resource: string(kind), Namespace: namespace, Query: signals.Query, SortColumn: table.SortColumn, SortOrder: table.SortOrder, SelectedName: signals.SelectedName, SelectedNamespace: selectedNamespace, DetailMode: detailMode},
 		Summary:        summary,
+		Fleet:          fleet,
 		Overview:       overview,
 		Table:          table,
 		Detail:         detail,
@@ -518,6 +527,151 @@ func (s *Server) summary(contexts []string) kube.Summary {
 	out.ServerVersion = out.Context
 	out.Error = strings.Join(errors, "\n")
 	return out
+}
+
+func (s *Server) fleetOverview(contexts []string) ui.FleetOverview {
+	sessions := s.sessionsForContexts(contexts)
+	s.waitForInitialSyncs(sessions)
+	out := ui.FleetOverview{UpdatedAt: time.Now()}
+	for _, session := range sessions {
+		if session == nil || session.cluster == nil || session.store == nil {
+			continue
+		}
+		overview := session.store.Overview()
+		card := fleetClusterFromOverview(session.cluster.ContextName, overview)
+		out.Clusters = append(out.Clusters, card)
+		for _, event := range overview.WarningEvents {
+			out.WarningEvents = append(out.WarningEvents, ui.FleetWarningEvent{
+				Cluster: session.cluster.ContextName,
+				Event:   event,
+			})
+		}
+		if overview.UpdatedAt.After(out.UpdatedAt) {
+			out.UpdatedAt = overview.UpdatedAt
+		}
+	}
+	sort.SliceStable(out.Clusters, func(i, j int) bool {
+		left := fleetStatusRank(out.Clusters[i].StatusKey)
+		right := fleetStatusRank(out.Clusters[j].StatusKey)
+		if left != right {
+			return left < right
+		}
+		if out.Clusters[i].WarningCount != out.Clusters[j].WarningCount {
+			return out.Clusters[i].WarningCount > out.Clusters[j].WarningCount
+		}
+		return strings.ToLower(out.Clusters[i].Context) < strings.ToLower(out.Clusters[j].Context)
+	})
+	sort.SliceStable(out.WarningEvents, func(i, j int) bool {
+		return out.WarningEvents[i].Event.LastSeen.After(out.WarningEvents[j].Event.LastSeen)
+	})
+	if len(out.WarningEvents) > 10 {
+		out.WarningEvents = out.WarningEvents[:10]
+	}
+	return out
+}
+
+func fleetClusterFromOverview(contextName string, overview kube.ClusterOverview) ui.FleetCluster {
+	nodes := overviewMetric(overview.Stats, "Nodes ready")
+	pods := overviewMetric(overview.Stats, "Pods healthy")
+	workloads := overviewMetric(overview.Stats, "Workloads ready")
+	cpu := overviewMetric(overview.Stats, "CPU")
+	memory := overviewMetric(overview.Stats, "Memory")
+	warnings := overviewMetricInt(overview.Stats, "Warnings")
+	card := ui.FleetCluster{
+		Context:      contextName,
+		Name:         contextName,
+		Nodes:        nodes,
+		Pods:         pods,
+		Workloads:    workloads,
+		CPU:          cpu,
+		Memory:       memory,
+		WarningCount: warnings,
+		StatusKey:    "good",
+		TopConcern:   "Healthy",
+	}
+	if clusterName := overviewIdentityValue(overview.Identity, "Cluster"); clusterName != "" {
+		card.Name = clusterName
+	}
+	if overview.Error != "" {
+		card.StatusKey = "danger"
+		card.Detail = overview.Error
+		card.TopConcern = overview.Error
+		return card
+	}
+	if warnings > 0 {
+		card.StatusKey = "warn"
+		card.TopConcern = warningEventLabel(warnings)
+		card.IssueKind = kube.KindEvents
+		card.IssueLabel = "Investigate warnings"
+		if len(overview.WarningEvents) > 0 {
+			card.Detail = overview.WarningEvents[0].Reason
+			card.IssueQuery = overview.WarningEvents[0].Reason
+			if card.IssueQuery == "" {
+				card.IssueQuery = overview.WarningEvents[0].InvolvedObject
+			}
+		}
+		return card
+	}
+	for _, metric := range []kube.OverviewMetric{nodes, pods, workloads} {
+		if metric.StatusKey == "danger" || metric.StatusKey == "warn" {
+			card.StatusKey = metric.StatusKey
+			card.TopConcern = metric.Label + " " + metric.Value
+			card.IssueKind = metric.Kind
+			card.IssueLabel = "Inspect " + strings.ToLower(metric.Label)
+			if metric.Detail != "" {
+				card.Detail = metric.Detail
+			}
+			return card
+		}
+	}
+	card.Detail = "No recent warnings"
+	return card
+}
+
+func warningEventLabel(count int) string {
+	if count == 1 {
+		return "1 recent warning event"
+	}
+	return fmt.Sprintf("%d recent warning events", count)
+}
+
+func overviewMetric(metrics []kube.OverviewMetric, label string) kube.OverviewMetric {
+	for _, metric := range metrics {
+		if metric.Label == label {
+			return metric
+		}
+	}
+	return kube.OverviewMetric{Label: label, Value: "0", StatusKey: "neutral"}
+}
+
+func overviewMetricInt(metrics []kube.OverviewMetric, label string) int {
+	value, err := strconv.Atoi(overviewMetric(metrics, label).Value)
+	if err != nil {
+		return 0
+	}
+	return value
+}
+
+func overviewIdentityValue(fields []kube.DetailField, name string) string {
+	for _, field := range fields {
+		if field.Name == name {
+			return field.Value
+		}
+	}
+	return ""
+}
+
+func fleetStatusRank(statusKey string) int {
+	switch statusKey {
+	case "danger":
+		return 0
+	case "warn":
+		return 1
+	case "good":
+		return 2
+	default:
+		return 3
+	}
 }
 
 func (s *Server) table(kind kube.ResourceKind, namespace, query, sortColumn, sortOrder string, contexts []string) kube.Table {
