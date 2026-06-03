@@ -82,6 +82,76 @@ func TestHandleIndexDefaultsToClusterOverview(t *testing.T) {
 	}
 }
 
+func TestHandleIndexRendersFleetOverviewForMultipleClusters(t *testing.T) {
+	app := New([]*kube.Cluster{
+		testClusterWithObjects("dev",
+			testNode("dev-node", true),
+			testPod("api", corev1.PodRunning),
+		),
+		testClusterWithObjects("prod",
+			testNode("prod-node", false),
+			testPod("worker", corev1.PodFailed),
+			&corev1.Event{
+				ObjectMeta: metav1.ObjectMeta{Name: "worker-event", Namespace: "default"},
+				Type:       corev1.EventTypeWarning,
+				Reason:     "BackOff",
+				Message:    "retrying failed pod",
+				InvolvedObject: corev1.ObjectReference{
+					Kind:      "Pod",
+					Name:      "worker",
+					Namespace: "default",
+				},
+				Count: 2,
+			},
+		),
+	}, context.Background(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	res := httptest.NewRecorder()
+
+	app.handleIndex(res, req)
+
+	body := res.Body.String()
+	for _, want := range []string{
+		`Fleet Overview`,
+		`2 clusters`,
+		`class="fleet-cluster-card`,
+		`data-fleet-context="dev"`,
+		`data-fleet-context="prod"`,
+		`data-fleet-issue="true"`,
+		`data-fleet-issue-kind="events"`,
+		`data-fleet-issue-query="BackOff"`,
+		`Investigate warnings`,
+		`dev`,
+		`prod`,
+		`Needs Attention`,
+		`BackOff`,
+		`retrying failed pod`,
+		`Pod/worker`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("fleet overview did not render %q: %s", want, body)
+		}
+	}
+}
+
+func TestOverviewClusterFilterUsesSingleClusterOverview(t *testing.T) {
+	app := New([]*kube.Cluster{
+		testClusterWithObjects("dev", testNode("dev-node", true), testPod("api", corev1.PodRunning)),
+		testClusterWithObjects("prod", testNode("prod-node", true), testPod("worker", corev1.PodRunning)),
+	}, context.Background(), nil)
+	state := app.state(readSignals(httptest.NewRequest(http.MethodGet, "/?clusters=prod", nil)))
+
+	if state.Signals.Context != "prod" {
+		t.Fatalf("context = %q, want prod", state.Signals.Context)
+	}
+	if len(state.Fleet.Clusters) != 1 || state.Fleet.Clusters[0].Context != "prod" {
+		t.Fatalf("fleet clusters = %#v, want one prod cluster", state.Fleet.Clusters)
+	}
+	if got := detailFieldValue(state.Overview.Identity, "Context"); got != "prod" {
+		t.Fatalf("overview context = %q, want prod", got)
+	}
+}
+
 func TestHandleIndexUsesQueryState(t *testing.T) {
 	app := New(nil, context.Background(), nil)
 	req := httptest.NewRequest("GET", "/?resource=deployments&query=api", nil)
@@ -508,12 +578,18 @@ func testClusterWithPod(contextName, podName string) *kube.Cluster {
 }
 
 func testClusterWithPods(contextName string, pods ...*corev1.Pod) *kube.Cluster {
-	objects := []runtime.Object{
-		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "default"}},
-	}
+	objects := make([]runtime.Object, 0, len(pods))
 	for _, pod := range pods {
 		objects = append(objects, pod)
 	}
+	return testClusterWithObjects(contextName, objects...)
+}
+
+func testClusterWithObjects(contextName string, extraObjects ...runtime.Object) *kube.Cluster {
+	objects := []runtime.Object{
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "default"}},
+	}
+	objects = append(objects, extraObjects...)
 	clientset := fake.NewSimpleClientset(objects...)
 	return &kube.Cluster{
 		Clientset:    clientset,
@@ -523,6 +599,21 @@ func testClusterWithPods(contextName string, pods ...*corev1.Pod) *kube.Cluster 
 		Namespace:    "default",
 		ConfigSource: "test",
 		Current:      contextName == "test" || contextName == "dev",
+	}
+}
+
+func testNode(name string, ready bool) *corev1.Node {
+	status := corev1.ConditionFalse
+	if ready {
+		status = corev1.ConditionTrue
+	}
+	return &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Status: corev1.NodeStatus{
+			Conditions: []corev1.NodeCondition{
+				{Type: corev1.NodeReady, Status: status},
+			},
+		},
 	}
 }
 
@@ -538,6 +629,15 @@ func testPod(name string, phase corev1.PodPhase) *corev1.Pod {
 			},
 		},
 	}
+}
+
+func detailFieldValue(fields []kube.DetailField, name string) string {
+	for _, field := range fields {
+		if field.Name == name {
+			return field.Value
+		}
+	}
+	return ""
 }
 
 func TestAssetEndpoints(t *testing.T) {
