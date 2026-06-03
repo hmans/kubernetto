@@ -9,6 +9,7 @@ import (
 	"html"
 	"io"
 	"math"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -181,6 +182,67 @@ func overviewRefreshAttrs() templ.Attributes {
 		"data-indicator:loading": true,
 		"data-on:click":          "@get('/ui/refresh')",
 	}
+}
+
+func overviewPodUsageLoadAttrs() templ.Attributes {
+	return prometheusChartLoadAttrs(url.Values{
+		"panel":  {"pod-usage-overview"},
+		"limit":  {"8"},
+		"cpu":    {kube.PodCPUQuery()},
+		"memory": {kube.PodMemoryQuery()},
+	})
+}
+
+func detailPodUsageLoadAttrs(namespace, name string) templ.Attributes {
+	return prometheusChartLoadAttrs(url.Values{
+		"panel":     {"pod-usage-detail"},
+		"namespace": {namespace},
+		"name":      {name},
+		"cpu":       {kube.PodCPUQueryFor(namespace, name)},
+		"memory":    {kube.PodMemoryQueryFor(namespace, name)},
+	})
+}
+
+func prometheusChartLoadAttrs(params url.Values) templ.Attributes {
+	return templ.Attributes{
+		"data-on-intersect__once": "@get('" + chartURL("/ui/charts/prometheus", params) + "')",
+	}
+}
+
+func chartURL(path string, params url.Values) string {
+	return path + "?" + params.Encode()
+}
+
+func hasPodSparklines(state PageState) bool {
+	return state.Table.Kind == kube.KindPods
+}
+
+func detailPodUsagePanelID(namespace, name string) string {
+	value := "detail-pod-usage"
+	if namespace != "" {
+		value += "-" + slug(namespace)
+	}
+	if name != "" {
+		value += "-" + slug(name)
+	}
+	return value
+}
+
+func slug(value string) string {
+	var out strings.Builder
+	lastDash := false
+	for _, r := range strings.ToLower(value) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			out.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			out.WriteByte('-')
+			lastDash = true
+		}
+	}
+	return strings.Trim(out.String(), "-")
 }
 
 func overviewStatLinkAttrs(metric kube.OverviewMetric) templ.Attributes {

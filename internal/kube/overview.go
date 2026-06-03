@@ -38,7 +38,6 @@ func (s *ResourceStore) Overview() ClusterOverview {
 	daemonSets := s.listDaemonSets("")
 	warningEvents := s.recentWarningEvents(6)
 	usage := s.totalPodUsage()
-	overview.Metrics, overview.PodUsage = s.podUsageTimelinesForOverview(8)
 	allocatable := nodeAllocatable(nodes)
 
 	readyNodes := 0
@@ -161,24 +160,27 @@ func usageMetrics(usage, allocatable corev1.ResourceList) []OverviewMetric {
 	}
 }
 
-func (s *ResourceStore) podUsageTimelinesForOverview(limit int) (MetricsState, []PodUsageGraph) {
+// PodUsageOverviewChart loads chart data on demand. Page overview rendering
+// deliberately does not call this so chart range queries stay lazy.
+func (s *ResourceStore) PodUsageOverviewChart(cpuQuery, memoryQuery string, limit int) PodUsageOverviewChart {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if timelines, target, err := s.loadPrometheusTimelines(ctx); err == nil {
-		return MetricsState{
+	if timelines, target, err := s.loadPrometheusTimelines(ctx, cpuQuery, memoryQuery); err == nil {
+		metrics := MetricsState{
 			Available: true,
 			Message:   "Prometheus is reporting pod usage.",
 			Source:    "Prometheus " + target.Namespace + "/" + target.Service,
 			Window:    "Last 60 minutes",
 			UpdatedAt: time.Now(),
-		}, s.topPodUsageFromTimelines(timelines, limit)
+		}
+		return PodUsageOverviewChart{Metrics: metrics, Pods: s.topPodUsageFromTimelines(timelines, limit)}
 	}
 
 	state := s.podMetricsState()
 	if state.Source == "" && state.Available {
 		state.Source = "metrics.k8s.io"
 	}
-	return state, s.topPodUsageFromTimelines(s.podUsageHistoryMap(), limit)
+	return PodUsageOverviewChart{Metrics: state, Pods: s.topPodUsageFromTimelines(s.podUsageHistoryMap(), limit)}
 }
 
 func (s *ResourceStore) topPodUsageFromTimelines(timelines map[string][]UsageSample, limit int) []PodUsageGraph {
