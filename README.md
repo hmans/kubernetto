@@ -22,6 +22,14 @@ You can also set only the local listen port:
 mise run app --port 9833
 ```
 
+By default, Kubernetto refuses non-loopback listen addresses because the
+dashboard can read Kubernetes cluster data using your kubeconfig credentials.
+If you intentionally need to expose it to your network, opt in explicitly:
+
+```sh
+mise run app --addr 0.0.0.0:9832 --allow-remote
+```
+
 ## Build
 
 ```sh

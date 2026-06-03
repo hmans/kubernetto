@@ -19,9 +19,10 @@ import (
 )
 
 type serverOptions struct {
-	addr       string
-	port       int
-	kubeconfig string
+	addr        string
+	port        int
+	kubeconfig  string
+	allowRemote bool
 }
 
 func main() {
@@ -55,13 +56,18 @@ func newRootCommand() *cobra.Command {
 	cmd.Flags().StringVar(&opts.addr, "addr", opts.addr, "HTTP listen address")
 	cmd.Flags().IntVar(&opts.port, "port", opts.port, "HTTP listen port on 127.0.0.1")
 	cmd.Flags().StringVar(&opts.kubeconfig, "kubeconfig", opts.kubeconfig, "path to kubeconfig; defaults to KUBECONFIG or ~/.kube/config")
+	cmd.Flags().BoolVar(&opts.allowRemote, "allow-remote", opts.allowRemote, "allow non-loopback HTTP listen addresses; exposes cluster data to the network")
 
 	return cmd
 }
 
 func resolveListenAddr(opts serverOptions, addrSet bool) (string, error) {
+	addr := opts.addr
 	if opts.port == 0 {
-		return opts.addr, nil
+		if err := validateRemoteBind(addr, opts.allowRemote); err != nil {
+			return "", err
+		}
+		return addr, nil
 	}
 	if addrSet {
 		return "", errors.New("use either --addr or --port, not both")
@@ -69,7 +75,26 @@ func resolveListenAddr(opts serverOptions, addrSet bool) (string, error) {
 	if opts.port < 1 || opts.port > 65535 {
 		return "", errors.New("--port must be between 1 and 65535")
 	}
-	return fmt.Sprintf("127.0.0.1:%d", opts.port), nil
+	addr = fmt.Sprintf("127.0.0.1:%d", opts.port)
+	return addr, nil
+}
+
+func validateRemoteBind(addr string, allowRemote bool) error {
+	if allowRemote {
+		return nil
+	}
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("invalid --addr %q: %w", addr, err)
+	}
+	if host == "localhost" {
+		return nil
+	}
+	ip := net.ParseIP(host)
+	if ip != nil && ip.IsLoopback() {
+		return nil
+	}
+	return errors.New("refusing non-loopback --addr without --allow-remote; the dashboard has access to Kubernetes cluster data")
 }
 
 func runServer(addr, kubeconfig string) error {
