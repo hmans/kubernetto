@@ -1,5 +1,9 @@
 package ui
 
+import "kubernetto/internal/kube"
+
+const overviewPodUsagePanelID = "overview-pod-usage-panel"
+
 templ UsageLegend() {
 	<div class="usage-legend" aria-hidden="true">
 		<span class="usage-legend-item cpu">
@@ -11,4 +15,121 @@ templ UsageLegend() {
 			MEM
 		</span>
 	</div>
+}
+
+templ OverviewPodUsagePanelPlaceholder() {
+	<section id={ overviewPodUsagePanelID } class="overview-panel" { overviewPodUsageLoadAttrs()... }>
+		<div class="overview-panel-head">
+			<div>
+				<h3>Pod Usage</h3>
+				<div class="updated">Last 60 minutes</div>
+			</div>
+			<span class="status-pill neutral">loading</span>
+		</div>
+		<div class="empty">Loading pod usage timelines...</div>
+	</section>
+}
+
+templ OverviewPodUsagePanel(chart kube.PodUsageOverviewChart) {
+	<section id={ overviewPodUsagePanelID } class="overview-panel" data-ignore-morph>
+		<div class="overview-panel-head">
+			<div>
+				<h3>Pod Usage</h3>
+				if chart.Metrics.Source != "" || chart.Metrics.Window != "" {
+					<div class="updated">{ metricsSourceLabel(chart.Metrics) }</div>
+				}
+			</div>
+			<div class="usage-panel-actions">
+				if chart.Metrics.Available && len(chart.Pods) > 0 {
+					@UsageLegend()
+				}
+				<span class={ metricsBadgeClass(chart.Metrics) }>{ metricsBadgeLabel(chart.Metrics) }</span>
+			</div>
+		</div>
+		if !chart.Metrics.Available {
+			<div class="empty">{ chart.Metrics.Message }</div>
+		} else if len(chart.Pods) == 0 {
+			<div class="empty">No pod usage samples are cached yet.</div>
+		} else {
+			<div class="pod-usage-list">
+				for _, pod := range chart.Pods {
+					<article class="pod-usage-item">
+						<div class="pod-usage-title">
+							<strong>{ pod.Name }</strong>
+							<span>{ pod.Namespace }</span>
+						</div>
+						<svg class="usage-timeline" viewBox="0 0 120 36" preserveAspectRatio="none" role="img" aria-label="CPU and memory usage timeline">
+							<polyline class="timeline-line memory" points={ memorySparklinePoints(pod.Samples) }></polyline>
+							<polyline class="timeline-line cpu" points={ cpuSparklinePoints(pod.Samples) }></polyline>
+						</svg>
+						<div class="usage-row">
+							<span>CPU</span>
+							<strong>{ pod.CPU }</strong>
+						</div>
+						<div class="usage-row">
+							<span>MEM</span>
+							<strong>{ pod.Memory }</strong>
+						</div>
+					</article>
+				}
+			</div>
+		}
+	</section>
+}
+
+templ DetailPodUsagePanelPlaceholder(detail kube.ResourceDetail) {
+	<section id={ detailPodUsagePanelID(detail.Namespace, detail.Name) } class="detail-section" { detailPodUsageLoadAttrs(detail.Namespace, detail.Name)... }>
+		<div class="detail-section-head">
+			<h3>Usage</h3>
+			<span class="status-pill neutral">loading</span>
+		</div>
+		<div class="empty compact">Loading pod usage timeline...</div>
+	</section>
+}
+
+templ DetailPodUsagePanel(chart kube.PodUsageDetailChart) {
+	<section id={ detailPodUsagePanelID(chart.Namespace, chart.Name) } class="detail-section" data-ignore-morph>
+		<div class="detail-section-head">
+			<div>
+				<h3>Usage</h3>
+				if chart.Metrics.Source != "" || chart.Metrics.Window != "" {
+					<div class="updated">{ metricsSourceLabel(chart.Metrics) }</div>
+				}
+			</div>
+			if len(chart.Samples) > 0 {
+				@UsageLegend()
+			}
+		</div>
+		if len(chart.Usage) == 0 {
+			<div class="empty compact">No pod usage samples are cached yet.</div>
+		} else {
+			if len(chart.Samples) > 0 {
+				<svg class="usage-timeline detail-timeline" viewBox="0 0 120 36" preserveAspectRatio="none" role="img" aria-label="CPU and memory usage timeline">
+					<polyline class="timeline-line memory" points={ memorySparklinePoints(chart.Samples) }></polyline>
+					<polyline class="timeline-line cpu" points={ cpuSparklinePoints(chart.Samples) }></polyline>
+				</svg>
+			}
+			<div class="detail-usage-list">
+				for _, usage := range chart.Usage {
+					<div class="usage-row">
+						<span>{ usage.Label }</span>
+						<strong>{ usage.Value }</strong>
+					</div>
+				}
+			</div>
+		}
+	</section>
+}
+
+templ PodUsageSparklineCell(row kube.Row, state PageState) {
+	<td class="sparkline-cell">
+		<kubernetto-promql-sparkline
+			data-ignore-morph
+			cluster-context={ state.Signals.Context }
+			pod-namespace={ row.Namespace }
+			pod-name={ row.Name }
+			cpu-query={ kube.PodCPUQueryFor(row.Namespace, row.Name) }
+			memory-query={ kube.PodMemoryQueryFor(row.Namespace, row.Name) }
+		></kubernetto-promql-sparkline>
+	</td>
 }

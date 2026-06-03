@@ -1,10 +1,15 @@
 package server
 
 import (
+	"compress/gzip"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -67,6 +72,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /ui/table", s.handleTable)
 	mux.HandleFunc("GET /ui/selection", s.handleSelection)
 	mux.HandleFunc("GET /ui/detail", s.handleDetail)
+	mux.HandleFunc("GET /ui/charts/prometheus", s.handlePrometheusChart)
+	mux.HandleFunc("POST /ui/prometheus/query-range", s.handlePrometheusQueryRange)
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	return withSecurityHeaders(mux)
 }
@@ -117,6 +124,79 @@ func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
 	state := s.state(signals)
 	sse := datastar.NewSSE(w, r)
 	sse.PatchElements(ui.RenderFragment(ui.DetailView(state)))
+}
+
+func (s *Server) handlePrometheusChart(w http.ResponseWriter, r *http.Request) {
+	signals := readSignals(r)
+	params := r.URL.Query()
+	session := s.session(signals.Context)
+	sse := datastar.NewSSE(w, r)
+	switch chartPanel(params.Get("panel"), params.Get("view")) {
+	case "pod-usage-detail":
+		namespace := firstNonEmpty(params.Get("namespace"), signals.SelectedNamespace)
+		name := firstNonEmpty(params.Get("name"), signals.SelectedName)
+		chart := kube.PodUsageDetailChart{
+			Name:      name,
+			Namespace: namespace,
+			Metrics:   unavailableChartMetrics("No Kubernetes client is configured."),
+		}
+		if session != nil && session.store != nil && name != "" {
+			chart = session.store.PodUsageDetailChart(namespace, name, params.Get("cpu"), params.Get("memory"))
+		}
+		sse.PatchElements(ui.RenderFragment(ui.DetailPodUsagePanel(chart)))
+		return
+	}
+
+	chart := kube.PodUsageOverviewChart{Metrics: unavailableChartMetrics("No Kubernetes client is configured.")}
+	if session != nil && session.store != nil {
+		chart = session.store.PodUsageOverviewChart(params.Get("cpu"), params.Get("memory"), chartLimit(params.Get("limit")))
+	}
+	sse.PatchElements(ui.RenderFragment(ui.OverviewPodUsagePanel(chart)))
+}
+
+type prometheusQueryRangeRequest struct {
+	Context       string                      `json:"context"`
+	Queries       []kube.PrometheusRangeQuery `json:"queries"`
+	WindowSeconds int                         `json:"windowSeconds"`
+	StepSeconds   int                         `json:"stepSeconds"`
+}
+
+const prometheusQueryRangeMaxQueries = 12
+
+func (s *Server) handlePrometheusQueryRange(w http.ResponseWriter, r *http.Request) {
+	var request prometheusQueryRangeRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64*1024)).Decode(&request); err != nil {
+		writeCompressedJSON(w, r, http.StatusBadRequest, map[string]string{"error": "invalid JSON request body"})
+		return
+	}
+	if len(request.Queries) == 0 {
+		writeCompressedJSON(w, r, http.StatusBadRequest, map[string]string{"error": "at least one PromQL query is required"})
+		return
+	}
+	if len(request.Queries) > prometheusQueryRangeMaxQueries {
+		writeCompressedJSON(w, r, http.StatusBadRequest, map[string]string{"error": "at most twelve PromQL queries can be loaded at once"})
+		return
+	}
+
+	session := s.session(request.Context)
+	if session == nil || session.store == nil {
+		writeCompressedJSON(w, r, http.StatusServiceUnavailable, kube.PrometheusRangeData{
+			Message:   "No Kubernetes client is configured.",
+			Window:    "Last 60 minutes",
+			UpdatedAt: time.Now(),
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
+	defer cancel()
+	data, err := session.store.PrometheusRangeData(ctx, request.Queries, chartWindow(request.WindowSeconds), chartStep(request.StepSeconds))
+	if err != nil {
+		data.Message = err.Error()
+		writeCompressedJSON(w, r, http.StatusOK, data)
+		return
+	}
+	writeCompressedJSON(w, r, http.StatusOK, data)
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
@@ -298,6 +378,94 @@ func sessionCluster(session *clusterSession) *kube.Cluster {
 		return nil
 	}
 	return session.cluster
+}
+
+func unavailableChartMetrics(message string) kube.MetricsState {
+	return kube.MetricsState{
+		Message:   message,
+		Window:    "Last 60 minutes",
+		UpdatedAt: time.Now(),
+	}
+}
+
+func chartLimit(value string) int {
+	if value == "" {
+		return 8
+	}
+	limit, err := strconv.Atoi(value)
+	if err != nil || limit < 1 {
+		return 8
+	}
+	if limit > 24 {
+		return 24
+	}
+	return limit
+}
+
+func chartWindow(seconds int) time.Duration {
+	if seconds <= 0 {
+		return 60 * time.Minute
+	}
+	if seconds < 60 {
+		seconds = 60
+	}
+	if seconds > 6*60*60 {
+		seconds = 6 * 60 * 60
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+func chartStep(seconds int) time.Duration {
+	if seconds <= 0 {
+		return 60 * time.Second
+	}
+	if seconds < 15 {
+		seconds = 15
+	}
+	if seconds > 5*60 {
+		seconds = 5 * 60
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+func chartPanel(panel, legacyView string) string {
+	switch panel {
+	case "pod-usage-overview", "pod-usage-detail":
+		return panel
+	}
+	if legacyView == "detail" {
+		return "pod-usage-detail"
+	}
+	return "pod-usage-overview"
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func writeCompressedJSON(w http.ResponseWriter, r *http.Request, status int, value any) {
+	data, err := json.Marshal(value)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("encode JSON response: %v", err), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Vary", "Accept-Encoding")
+	if strings.Contains(strings.ToLower(r.Header.Get("Accept-Encoding")), "gzip") {
+		w.Header().Set("Content-Encoding", "gzip")
+		w.WriteHeader(status)
+		gz := gzip.NewWriter(w)
+		_, _ = gz.Write(data)
+		_ = gz.Close()
+		return
+	}
+	w.WriteHeader(status)
+	_, _ = w.Write(data)
 }
 
 func resourceDef(kind kube.ResourceKind) kube.ResourceDef {

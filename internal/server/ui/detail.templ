@@ -68,29 +68,8 @@ templ DetailOverviewView(state PageState) {
 			</div>
 		}
 	</dl>
-	if len(state.Detail.Usage) > 0 {
-		<section class="detail-section">
-			<div class="detail-section-head">
-				<h3>Usage</h3>
-				if len(state.Detail.UsageTimeline) > 0 {
-					@UsageLegend()
-				}
-			</div>
-			if len(state.Detail.UsageTimeline) > 0 {
-				<svg class="usage-timeline detail-timeline" viewBox="0 0 120 36" preserveAspectRatio="none" role="img" aria-label="CPU and memory usage timeline">
-					<polyline class="timeline-line memory" points={ memorySparklinePoints(state.Detail.UsageTimeline) }></polyline>
-					<polyline class="timeline-line cpu" points={ cpuSparklinePoints(state.Detail.UsageTimeline) }></polyline>
-				</svg>
-			}
-			<div class="detail-usage-list">
-				for _, usage := range state.Detail.Usage {
-					<div class="usage-row">
-						<span>{ usage.Label }</span>
-						<strong>{ usage.Value }</strong>
-					</div>
-				}
-			</div>
-		</section>
+	if state.Detail.Kind == kube.KindPods {
+		@DetailPodUsagePanelPlaceholder(state.Detail)
 	}
 	for _, section := range state.Detail.Sections {
 		@DetailSectionView(section)

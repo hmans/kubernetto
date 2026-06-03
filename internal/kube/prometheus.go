@@ -45,22 +45,110 @@ type prometheusSample struct {
 	Value     float64
 }
 
-func (s *ResourceStore) loadPrometheusTimelines(ctx context.Context) (map[string][]UsageSample, prometheusTarget, error) {
+type PrometheusRangeQuery struct {
+	Name  string `json:"name"`
+	Query string `json:"query"`
+}
+
+type PrometheusRangeData struct {
+	Available bool                    `json:"available"`
+	Message   string                  `json:"message"`
+	Source    string                  `json:"source,omitempty"`
+	Window    string                  `json:"window"`
+	UpdatedAt time.Time               `json:"updatedAt"`
+	Series    []PrometheusRangeSeries `json:"series"`
+}
+
+type PrometheusRangeSeries struct {
+	Name    string                  `json:"name"`
+	Metric  map[string]string       `json:"metric"`
+	Samples []PrometheusRangeSample `json:"samples"`
+}
+
+type PrometheusRangeSample struct {
+	Timestamp time.Time `json:"timestamp"`
+	Value     float64   `json:"value"`
+}
+
+func (s *ResourceStore) PrometheusRangeData(ctx context.Context, queries []PrometheusRangeQuery, window, step time.Duration) (PrometheusRangeData, error) {
+	out := PrometheusRangeData{
+		Message:   "Prometheus range data is unavailable.",
+		Window:    usageWindowLabel(window),
+		UpdatedAt: time.Now(),
+	}
+	if len(queries) == 0 {
+		return out, errors.New("at least one PromQL query is required")
+	}
+	targets := prometheusTargets(s.listServices(""))
+	if len(targets) == 0 {
+		return out, errors.New("no Prometheus-looking services found")
+	}
+	if window <= 0 {
+		window = usageMetricsWindow
+	}
+	if step <= 0 {
+		step = prometheusStep
+	}
+
+	end := time.Now()
+	start := end.Add(-window)
+	var lastErr error
+	for _, target := range targets {
+		series := []PrometheusRangeSeries{}
+		failed := false
+		for _, query := range queries {
+			if strings.TrimSpace(query.Query) == "" {
+				lastErr = errors.New("PromQL query cannot be empty")
+				failed = true
+				break
+			}
+			result, err := s.queryPrometheusRange(ctx, target, query.Query, start, end, step)
+			if err != nil {
+				lastErr = err
+				failed = true
+				break
+			}
+			series = append(series, prometheusRangeSeries(query.Name, result)...)
+		}
+		if failed {
+			continue
+		}
+		out.Available = true
+		out.Message = "Prometheus is reporting range data."
+		out.Source = "Prometheus " + target.Namespace + "/" + target.Service
+		out.Window = usageWindowLabel(window)
+		out.UpdatedAt = time.Now()
+		out.Series = series
+		return out, nil
+	}
+	if lastErr != nil {
+		return out, lastErr
+	}
+	return out, errors.New("Prometheus range queries returned no usable target")
+}
+
+func (s *ResourceStore) loadPrometheusTimelines(ctx context.Context, cpuQuery, memoryQuery string) (map[string][]UsageSample, prometheusTarget, error) {
 	targets := prometheusTargets(s.listServices(""))
 	if len(targets) == 0 {
 		return nil, prometheusTarget{}, errors.New("no Prometheus-looking services found")
+	}
+	if cpuQuery == "" {
+		cpuQuery = podCPUQuery
+	}
+	if memoryQuery == "" {
+		memoryQuery = podMemoryQuery
 	}
 
 	end := time.Now()
 	start := end.Add(-usageMetricsWindow)
 	var lastErr error
 	for _, target := range targets {
-		cpuSeries, err := s.queryPrometheusRange(ctx, target, podCPUQuery, start, end, prometheusStep)
+		cpuSeries, err := s.queryPrometheusRange(ctx, target, cpuQuery, start, end, prometheusStep)
 		if err != nil {
 			lastErr = err
 			continue
 		}
-		memorySeries, err := s.queryPrometheusRange(ctx, target, podMemoryQuery, start, end, prometheusStep)
+		memorySeries, err := s.queryPrometheusRange(ctx, target, memoryQuery, start, end, prometheusStep)
 		if err != nil {
 			lastErr = err
 			continue
@@ -80,6 +168,56 @@ func (s *ResourceStore) loadPrometheusPodTimeline(ctx context.Context, namespace
 		return nil, prometheusTarget{}, err
 	}
 	return timelines[podKey(namespace, name)], target, nil
+}
+
+// PodUsageDetailChart loads chart data on demand. Resource detail rendering
+// deliberately does not call this so historical metrics stay lazy.
+func (s *ResourceStore) PodUsageDetailChart(namespace, name, cpuQuery, memoryQuery string) PodUsageDetailChart {
+	chart := PodUsageDetailChart{Name: name, Namespace: namespace}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	timelines, target, err := s.loadPrometheusTimelinesForQueries(ctx, normalizedPodCPUQuery(namespace, name, cpuQuery), normalizedPodMemoryQuery(namespace, name, memoryQuery))
+	timeline := timelines[podKey(namespace, name)]
+	if err == nil && len(timeline) > 0 {
+		chart.Metrics = MetricsState{
+			Available: true,
+			Message:   "Prometheus is reporting pod usage.",
+			Source:    "Prometheus " + target.Namespace + "/" + target.Service,
+			Window:    "Last 60 minutes",
+			UpdatedAt: time.Now(),
+		}
+	} else {
+		timeline = s.podUsageTimelineFor(namespace, name)
+		chart.Metrics = s.podMetricsState()
+		if chart.Metrics.Source == "" && chart.Metrics.Available {
+			chart.Metrics.Source = "metrics.k8s.io"
+		}
+	}
+
+	latest, ok := latestUsageSample(timeline)
+	if !ok {
+		usage := s.podUsageFor(namespace, name)
+		if len(usage) == 0 {
+			return chart
+		}
+		latest = UsageSample{Timestamp: time.Now()}
+		if cpu := usage[corev1.ResourceCPU]; !cpu.IsZero() {
+			latest.CPU = cpu.MilliValue()
+		}
+		if memory := usage[corev1.ResourceMemory]; !memory.IsZero() {
+			latest.Memory = memory.Value()
+		}
+		timeline = []UsageSample{latest}
+	}
+	if latest.CPU == 0 && latest.Memory == 0 {
+		return chart
+	}
+	chart.Usage = usageGraphs(
+		UsageGraph{Label: "CPU", Value: cpuMilliValue(latest.CPU)},
+		UsageGraph{Label: "Memory", Value: byteValue(latest.Memory)},
+	)
+	chart.Samples = timeline
+	return chart
 }
 
 func (s *ResourceStore) loadPrometheusTimelinesForQueries(ctx context.Context, cpuQuery, memoryQuery string) (map[string][]UsageSample, prometheusTarget, error) {
@@ -113,12 +251,82 @@ func (s *ResourceStore) loadPrometheusTimelinesForQueries(ctx context.Context, c
 const podCPUQuery = `sum by (namespace, pod) (rate(container_cpu_usage_seconds_total{pod!="",container!="",image!=""}[5m]))`
 const podMemoryQuery = `sum by (namespace, pod) (container_memory_working_set_bytes{pod!="",container!="",image!=""})`
 
+func PodCPUQuery() string {
+	return podCPUQuery
+}
+
+func PodMemoryQuery() string {
+	return podMemoryQuery
+}
+
+func PodCPUQueryFor(namespace, pod string) string {
+	return podCPUQueryFor(namespace, pod)
+}
+
+func PodMemoryQueryFor(namespace, pod string) string {
+	return podMemoryQueryFor(namespace, pod)
+}
+
 func podCPUQueryFor(namespace, pod string) string {
 	return `sum by (namespace, pod) (rate(container_cpu_usage_seconds_total{namespace=` + strconv.Quote(namespace) + `,pod=` + strconv.Quote(pod) + `,container!="",image!=""}[5m]))`
 }
 
 func podMemoryQueryFor(namespace, pod string) string {
 	return `sum by (namespace, pod) (container_memory_working_set_bytes{namespace=` + strconv.Quote(namespace) + `,pod=` + strconv.Quote(pod) + `,container!="",image!=""})`
+}
+
+func prometheusRangeSeries(name string, series []prometheusSeries) []PrometheusRangeSeries {
+	out := make([]PrometheusRangeSeries, 0, len(series))
+	for _, item := range series {
+		samples := make([]PrometheusRangeSample, 0, len(item.Values))
+		for _, sample := range item.Values {
+			samples = append(samples, PrometheusRangeSample{
+				Timestamp: sample.Timestamp,
+				Value:     sample.Value,
+			})
+		}
+		out = append(out, PrometheusRangeSeries{
+			Name:    name,
+			Metric:  item.Metric,
+			Samples: samples,
+		})
+	}
+	return out
+}
+
+func usageWindowLabel(window time.Duration) string {
+	if window <= 0 {
+		window = usageMetricsWindow
+	}
+	if window%time.Hour == 0 {
+		hours := int(window / time.Hour)
+		if hours == 1 {
+			return "Last 1 hour"
+		}
+		return fmt.Sprintf("Last %d hours", hours)
+	}
+	if window%time.Minute == 0 {
+		minutes := int(window / time.Minute)
+		if minutes == 1 {
+			return "Last 1 minute"
+		}
+		return fmt.Sprintf("Last %d minutes", minutes)
+	}
+	return "Last " + window.Round(time.Second).String()
+}
+
+func normalizedPodCPUQuery(namespace, pod, query string) string {
+	if query != "" {
+		return query
+	}
+	return podCPUQueryFor(namespace, pod)
+}
+
+func normalizedPodMemoryQuery(namespace, pod, query string) string {
+	if query != "" {
+		return query
+	}
+	return podMemoryQueryFor(namespace, pod)
 }
 
 func prometheusTargets(services []*corev1.Service) []prometheusTarget {

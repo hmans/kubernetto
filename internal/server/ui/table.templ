@@ -29,6 +29,9 @@ templ TableView(state PageState) {
 									</button>
 								</th>
 							}
+							if hasPodSparklines(state) {
+								<th class="sparkline-heading" scope="col">Usage</th>
+							}
 						</tr>
 					</thead>
 					<tbody>
@@ -42,6 +45,9 @@ templ TableView(state PageState) {
 											{ cell.Value }
 										}
 									</td>
+								}
+								if hasPodSparklines(state) {
+									@PodUsageSparklineCell(row, state)
 								}
 							</tr>
 						}
