@@ -222,6 +222,24 @@ function eventElement(event: Event): Element | null {
   return event.target instanceof Element ? event.target : null;
 }
 
+function isEditableShortcutTarget(target: Element | null): boolean {
+  if (!target) {
+    return false;
+  }
+  if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) {
+    return true;
+  }
+  return Boolean(target.closest("[contenteditable=''], [contenteditable='true']"));
+}
+
+function focusSearchInput() {
+  const query = document.querySelector<HTMLInputElement>("#query");
+  if (!query) {
+    return;
+  }
+  query.focus();
+}
+
 function applyOptimisticResourceNav(resourceButton: HTMLElement) {
   const nav = resourceButton.closest("#resource-nav");
   const group = resourceButton.closest("[data-resource-group]");
@@ -378,10 +396,19 @@ document.addEventListener("click", (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
+  const target = eventElement(event);
+  if (event.key === "/" && !event.altKey && !event.ctrlKey && !event.metaKey && !isEditableShortcutTarget(target)) {
+    const query = document.querySelector<HTMLInputElement>("#query");
+    if (query) {
+      event.preventDefault();
+      focusSearchInput();
+    }
+    return;
+  }
+
   if (event.key !== "Enter") {
     return;
   }
-  const target = eventElement(event);
   const row = target?.closest<HTMLElement>("tr[data-row-name]");
   if (!row) {
     return;

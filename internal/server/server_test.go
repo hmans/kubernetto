@@ -13,6 +13,7 @@ import (
 
 	"kubernetto/internal/kube"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -251,10 +252,19 @@ func TestHandleTablePatchesPageChromeForNavigation(t *testing.T) {
 		`>Deployments</h1>`,
 		`id="summary-slot"`,
 		`id="resource-controls"`,
-		`aria-label="Table controls"`,
+		`aria-label="Table search"`,
+		`id="query"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("table navigation response did not patch %q:\n%s", want, body)
+		}
+	}
+	for _, unwanted := range []string{
+		`id="namespace-picker"`,
+		`aria-label="Refresh"`,
+	} {
+		if strings.Contains(body, unwanted) {
+			t.Fatalf("table navigation response patched removed control %q:\n%s", unwanted, body)
 		}
 	}
 }
@@ -290,12 +300,30 @@ func TestMultiClusterTableAggregatesRowsWithClusterColumn(t *testing.T) {
 	}
 }
 
-func TestMultiClusterTableCanFilterByCluster(t *testing.T) {
+func TestMultiClusterTableDoesNotFilterByClusterOrNodeContext(t *testing.T) {
+	devPod := testPod("api", corev1.PodRunning)
+	devPod.Spec.NodeName = "dev"
+	prodPod := testPod("worker", corev1.PodRunning)
+	prodPod.Spec.NodeName = "prod"
+	app := New([]*kube.Cluster{
+		testClusterWithPods("dev", devPod),
+		testClusterWithPods("prod", prodPod),
+	}, context.Background(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/ui/table?resource=pods&query=prod", nil)
+
+	state := app.state(readSignals(req))
+
+	if len(state.Table.Rows) != 0 {
+		t.Fatalf("rows = %d, want 0 because cluster/node context is not searched: %#v", len(state.Table.Rows), state.Table.Rows)
+	}
+}
+
+func TestMultiClusterTableFiltersByResourceName(t *testing.T) {
 	app := New([]*kube.Cluster{
 		testClusterWithPod("dev", "api"),
 		testClusterWithPod("prod", "worker"),
 	}, context.Background(), nil)
-	req := httptest.NewRequest(http.MethodGet, "/ui/table?resource=pods&query=prod", nil)
+	req := httptest.NewRequest(http.MethodGet, "/ui/table?resource=pods&query=worker", nil)
 
 	state := app.state(readSignals(req))
 
@@ -304,6 +332,25 @@ func TestMultiClusterTableCanFilterByCluster(t *testing.T) {
 	}
 	if state.Table.Rows[0].Name != "worker" || state.Table.Rows[0].Cluster != "prod" {
 		t.Fatalf("filtered row = %#v, want prod worker", state.Table.Rows[0])
+	}
+}
+
+func TestMultiClusterDeploymentTableDoesNotFilterByNamespace(t *testing.T) {
+	app := New([]*kube.Cluster{
+		testClusterWithObjects("dev",
+			testDeployment("alice-backend", "chatto-dev"),
+			testDeployment("chatto-hub", "platform"),
+		),
+		testClusterWithObjects("prod",
+			testDeployment("bob-backend", "chatto-dev"),
+		),
+	}, context.Background(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/ui/table?resource=deployments&query=chatto", nil)
+
+	state := app.state(readSignals(req))
+
+	if got, want := tableRowNames(state.Table.Rows), []string{"chatto-hub"}; !equalStringSlices(got, want) {
+		t.Fatalf("filtered deployment rows = %#v, want %#v", got, want)
 	}
 }
 
@@ -629,6 +676,45 @@ func testPod(name string, phase corev1.PodPhase) *corev1.Pod {
 			},
 		},
 	}
+}
+
+func testDeployment(name, namespace string) *appsv1.Deployment {
+	return &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: int32Ptr(1),
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": name}},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": name}},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: name}}},
+			},
+		},
+		Status: appsv1.DeploymentStatus{ReadyReplicas: 1},
+	}
+}
+
+func int32Ptr(value int32) *int32 {
+	return &value
+}
+
+func tableRowNames(rows []kube.Row) []string {
+	names := make([]string, 0, len(rows))
+	for _, row := range rows {
+		names = append(names, row.Name)
+	}
+	return names
+}
+
+func equalStringSlices(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func detailFieldValue(fields []kube.DetailField, name string) string {
