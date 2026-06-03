@@ -810,6 +810,38 @@ func detailTabAttrs(mode string, state PageState) templ.Attributes {
 	}
 }
 
+func detailFieldLinkHref(field kube.DetailField, signals Signals) string {
+	if field.Link == nil {
+		return ""
+	}
+	q := url.Values{}
+	if signals.Context != "" {
+		q.Set("context", signals.Context)
+	}
+	if signals.Clusters != "" {
+		q.Set("clusters", signals.Clusters)
+	}
+	q.Set("resource", string(field.Link.Resource))
+	if field.Link.Namespace != "" {
+		q.Set("namespace", field.Link.Namespace)
+		q.Set("selectedNamespace", field.Link.Namespace)
+	}
+	q.Set("selectedName", field.Link.Name)
+	q.Set("detailMode", "overview")
+	return "/?" + q.Encode()
+}
+
+func detailFieldLinkAttrs(field kube.DetailField, signals Signals) templ.Attributes {
+	if field.Link == nil {
+		return templ.Attributes{}
+	}
+	return templ.Attributes{
+		"href":  detailFieldLinkHref(field, signals),
+		"class": "font-[680] text-[var(--accent-2)] underline decoration-[var(--accent)] underline-offset-2 hover:text-[var(--text-strong)]",
+		"title": "Open owner details",
+	}
+}
+
 func selectedRow(row kube.Row, state PageState) bool {
 	return row.Name == state.Signals.SelectedName && row.Namespace == state.Signals.SelectedNamespace && (row.Cluster == "" || row.Cluster == state.Signals.Context)
 }
