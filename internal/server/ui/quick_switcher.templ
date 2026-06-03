@@ -1,0 +1,50 @@
+package ui
+
+templ QuickSwitcherView(state PageState) {
+	<div id="quick-switcher" class="quick-switcher" data-quick-switcher hidden>
+		<div class="quick-switcher-backdrop" data-quick-close></div>
+		<section
+			class="quick-switcher-panel"
+			role="dialog"
+			aria-modal="true"
+			aria-label="Find anything"
+			aria-describedby="quick-switcher-count"
+		>
+			<div class="quick-switcher-search">
+				<span class="icon-[lucide--search]" aria-hidden="true"></span>
+				<input
+					id="quick-switcher-input"
+					type="search"
+					placeholder="Find anything"
+					autocomplete="off"
+					spellcheck="false"
+					data-quick-input
+				/>
+				<div id="quick-switcher-count" class="quick-switcher-count" data-quick-count></div>
+				<button class="quick-switcher-close" type="button" title="Close" aria-label="Close" data-quick-close>
+					<span class="icon-[lucide--x]" aria-hidden="true"></span>
+				</button>
+			</div>
+			<div class="quick-switcher-results" role="listbox" aria-label="Find anything results" data-quick-results>
+				for index, item := range quickSwitcherItems(state) {
+					<button { quickSwitcherItemAttrs(item, index)... }>
+						<span class={ "quick-switcher-icon " + item.Icon } aria-hidden="true"></span>
+						<span class="quick-switcher-copy">
+							<span class="quick-switcher-label">{ item.Label }</span>
+							<span class="quick-switcher-meta">
+								for _, token := range quickSwitcherMetaTokens(item) {
+									<span class="quick-switcher-meta-token">
+										<span class={ "quick-switcher-meta-icon " + token.Icon } aria-hidden="true"></span>
+										<span>{ token.Label }</span>
+									</span>
+								}
+							</span>
+						</span>
+						<span class="quick-switcher-kind">{ item.KindLabel }</span>
+					</button>
+				}
+			</div>
+			<div class="quick-switcher-empty" data-quick-empty hidden>No matches</div>
+		</section>
+	</div>
+}

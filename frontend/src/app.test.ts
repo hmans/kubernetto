@@ -123,3 +123,136 @@ describe("action item URL sync", () => {
     expect(params.get("selectedNamespace")).toBe("default");
   });
 });
+
+describe("quick switcher", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    window.history.replaceState({}, "", "/");
+  });
+
+  it("opens with Cmd-K and filters visible results", () => {
+    document.body.innerHTML = `
+      <button data-quick-open></button>
+      <div data-quick-switcher hidden>
+        <input data-quick-input />
+        <div data-quick-count></div>
+        <div data-quick-empty hidden></div>
+        <button data-quick-result data-quick-search="pods workloads" aria-selected="false"></button>
+        <button data-quick-result data-quick-search="services network" aria-selected="false"></button>
+      </div>
+    `;
+
+    document.dispatchEvent(new KeyboardEvent("keydown", {
+      bubbles: true,
+      key: "k",
+      metaKey: true,
+    }));
+
+    const palette = document.querySelector<HTMLElement>("[data-quick-switcher]");
+    expect(palette?.hidden).toBe(false);
+
+    const input = document.querySelector<HTMLInputElement>("[data-quick-input]");
+    input!.value = "svc";
+    input!.dispatchEvent(new InputEvent("input", { bubbles: true }));
+
+    const results = Array.from(document.querySelectorAll<HTMLElement>("[data-quick-result]"));
+    expect(results[0].hidden).toBe(true);
+    expect(results[1].hidden).toBe(true);
+    expect(document.querySelector<HTMLElement>("[data-quick-empty]")?.hidden).toBe(false);
+
+    input!.value = "network";
+    input!.dispatchEvent(new InputEvent("input", { bubbles: true }));
+
+    expect(results[0].hidden).toBe(true);
+    expect(results[1].hidden).toBe(false);
+    expect(results[1].getAttribute("aria-selected")).toBe("true");
+    expect(document.querySelector<HTMLElement>("[data-quick-count]")?.textContent).toBe("1 result");
+  });
+
+  it("orders stronger label and object matches before weak context matches", () => {
+    document.body.innerHTML = `
+      <div data-quick-switcher>
+        <input data-quick-input />
+        <div data-quick-count></div>
+        <div data-quick-empty hidden></div>
+        <div data-quick-results>
+          <button
+            data-quick-result
+            data-quick-index="0"
+            data-quick-label="Pods"
+            data-quick-kind="View"
+            data-quick-context="chatto-dev"
+            data-quick-search="pods namespaced resource chatto-dev"
+            aria-selected="false"
+          ></button>
+          <button
+            data-quick-result
+            data-quick-index="1"
+            data-quick-label="chatto-api"
+            data-quick-kind="Pods"
+            data-quick-context="chatto-dev"
+            data-quick-selected-name="chatto-api"
+            data-quick-search="chatto-api pods default chatto-dev running"
+            aria-selected="false"
+          ></button>
+          <button
+            data-quick-result
+            data-quick-index="2"
+            data-quick-label="chatto"
+            data-quick-kind="Namespace"
+            data-quick-context="chatto-dev"
+            data-quick-namespace="chatto"
+            data-quick-search="chatto namespace"
+            aria-selected="false"
+          ></button>
+        </div>
+      </div>
+    `;
+
+    const input = document.querySelector<HTMLInputElement>("[data-quick-input]");
+    input!.value = "chatto";
+    input!.dispatchEvent(new InputEvent("input", { bubbles: true }));
+
+    const results = Array.from(document.querySelectorAll<HTMLElement>("[data-quick-result]"));
+    expect(results.map((result) => result.dataset.quickLabel)).toEqual(["chatto", "chatto-api", "Pods"]);
+    expect(results[0].getAttribute("aria-selected")).toBe("true");
+    expect(document.querySelector<HTMLElement>("[data-quick-count]")?.textContent).toBe("3 results");
+  });
+
+  it("pushes URL state and closes from selected result", () => {
+    document.body.innerHTML = `
+      <div data-quick-switcher>
+        <input data-quick-input />
+        <div data-quick-count></div>
+        <div data-quick-empty hidden></div>
+        <button
+          data-quick-result
+          data-quick-search="pods api"
+          data-quick-context="prod"
+          data-quick-clusters="prod"
+          data-quick-resource="pods"
+          data-quick-namespace="default"
+          data-quick-selected-name="api"
+          data-quick-selected-namespace="default"
+          data-quick-detail-mode="overview"
+          aria-selected="false"
+        ></button>
+      </div>
+    `;
+
+    document.dispatchEvent(new KeyboardEvent("keydown", {
+      bubbles: true,
+      key: "Enter",
+    }));
+
+    const params = new URLSearchParams(window.location.search);
+    expect(params.get("context")).toBe("prod");
+    expect(params.get("clusters")).toBe("prod");
+    expect(params.get("resource")).toBe("pods");
+    expect(params.get("namespace")).toBe("default");
+    expect(params.get("selectedName")).toBe("api");
+    expect(params.get("selectedNamespace")).toBe("default");
+    expect(document.querySelector<HTMLElement>("[data-quick-switcher]")?.hidden).toBe(true);
+  });
+
+});
