@@ -76,7 +76,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /ui/selection", s.handleSelection)
 	mux.HandleFunc("GET /ui/detail", s.handleDetail)
 	mux.HandleFunc("GET /ui/charts/prometheus", s.handlePrometheusChart)
-	mux.HandleFunc("POST /ui/prometheus/query-range", s.handlePrometheusQueryRange)
+	mux.Handle("POST /api/", http.StripPrefix("/api", s.apiRoutes()))
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	return withSecurityHeaders(mux)
 }
@@ -152,7 +152,7 @@ func (s *Server) handlePrometheusChart(w http.ResponseWriter, r *http.Request) {
 			Metrics:   unavailableChartMetrics("No Kubernetes client is configured."),
 		}
 		if session != nil && session.store != nil && name != "" {
-			chart = session.store.PodUsageDetailChart(namespace, name, "", "")
+			chart = session.store.PodUsageDetailChart(namespace, name)
 		}
 		sse.PatchElements(ui.RenderFragment(ui.DetailPodUsagePanel(chart)))
 		return
@@ -160,58 +160,9 @@ func (s *Server) handlePrometheusChart(w http.ResponseWriter, r *http.Request) {
 
 	chart := kube.PodUsageOverviewChart{Metrics: unavailableChartMetrics("No Kubernetes client is configured.")}
 	if session != nil && session.store != nil {
-		chart = session.store.PodUsageOverviewChart("", "", chartLimit(params.Get("limit")))
+		chart = session.store.PodUsageOverviewChart(chartLimit(params.Get("limit")))
 	}
 	sse.PatchElements(ui.RenderFragment(ui.OverviewPodUsagePanel(chart)))
-}
-
-type prometheusQueryRangeRequest struct {
-	Context       string                      `json:"context"`
-	Queries       []kube.PrometheusRangeQuery `json:"queries"`
-	WindowSeconds int                         `json:"windowSeconds"`
-	StepSeconds   int                         `json:"stepSeconds"`
-}
-
-const prometheusQueryRangeMaxQueries = 12
-
-func (s *Server) handlePrometheusQueryRange(w http.ResponseWriter, r *http.Request) {
-	var request prometheusQueryRangeRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64*1024)).Decode(&request); err != nil {
-		writeCompressedJSON(w, r, http.StatusBadRequest, map[string]string{"error": "invalid JSON request body"})
-		return
-	}
-	if len(request.Queries) == 0 {
-		writeCompressedJSON(w, r, http.StatusBadRequest, map[string]string{"error": "at least one PromQL query is required"})
-		return
-	}
-	if len(request.Queries) > prometheusQueryRangeMaxQueries {
-		writeCompressedJSON(w, r, http.StatusBadRequest, map[string]string{"error": "at most twelve PromQL queries can be loaded at once"})
-		return
-	}
-	if err := kube.ValidatePrometheusRangeQueries(request.Queries); err != nil {
-		writeCompressedJSON(w, r, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	}
-
-	session := s.session(request.Context)
-	if session == nil || session.store == nil {
-		writeCompressedJSON(w, r, http.StatusServiceUnavailable, kube.PrometheusRangeData{
-			Message:   "No Kubernetes client is configured.",
-			Window:    "Last 60 minutes",
-			UpdatedAt: time.Now(),
-		})
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
-	defer cancel()
-	data, err := session.store.PrometheusRangeData(ctx, request.Queries, chartWindow(request.WindowSeconds), chartStep(request.StepSeconds))
-	if err != nil {
-		data.Message = err.Error()
-		writeCompressedJSON(w, r, http.StatusOK, data)
-		return
-	}
-	writeCompressedJSON(w, r, http.StatusOK, data)
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {

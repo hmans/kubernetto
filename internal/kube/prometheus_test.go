@@ -101,39 +101,30 @@ func TestPrometheusSampleParsesFractionalTimestamp(t *testing.T) {
 	}
 }
 
-func TestValidatePrometheusRangeQueriesAllowsPodUsageQueries(t *testing.T) {
-	queries := []PrometheusRangeQuery{
-		{Name: "overview-cpu", Query: PodCPUQuery()},
-		{Name: "overview-memory", Query: PodMemoryQuery()},
-		{Name: "pod-cpu", Query: PodCPUQueryFor("prod", "api")},
-		{Name: "pod-memory", Query: PodMemoryQueryFor("prod", "api")},
-		{Name: "batch-cpu", Query: `sum by (namespace, pod) (rate(container_cpu_usage_seconds_total{namespace="prod",pod=~"api|worker",container!="",image!=""}[5m]))`},
-		{Name: "batch-memory", Query: `sum by (namespace, pod) (container_memory_working_set_bytes{namespace="prod",pod=~"api|worker",container!="",image!=""})`},
-	}
+func TestPodUsageRangeQueriesBuildPreparedPromQL(t *testing.T) {
+	queries := podUsageRangeQueries([]PodUsageQueryPod{
+		{Namespace: "prod", Pod: "api"},
+		{Namespace: "prod", Pod: "worker.1"},
+		{Namespace: "prod", Pod: "api"},
+		{Namespace: "qa", Pod: `job"quoted`},
+	})
 
-	if err := ValidatePrometheusRangeQueries(queries); err != nil {
-		t.Fatalf("validate queries: %v", err)
+	if len(queries) != 2 {
+		t.Fatalf("queries = %d, want 2: %#v", len(queries), queries)
 	}
-}
-
-func TestValidatePrometheusRangeQueriesRejectsGenericPromQL(t *testing.T) {
-	tests := []struct {
-		name  string
-		query string
-	}{
-		{name: "generic up", query: "up"},
-		{name: "empty", query: " "},
-		{name: "oversized", query: strings.Repeat("a", prometheusMaxQueryLength+1)},
-		{name: "wrong metric", query: `sum by (namespace, pod) (rate(process_cpu_seconds_total{namespace="prod",pod=~"api",container!="",image!=""}[5m]))`},
+	if queries[0].Name != "cpu" || queries[1].Name != "memory" {
+		t.Fatalf("query names = %#v", queries)
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := ValidatePrometheusRangeQueries([]PrometheusRangeQuery{{Name: tt.name, Query: tt.query}})
-			if err == nil {
-				t.Fatalf("expected validation error for %q", tt.query)
-			}
-		})
+	for _, want := range []string{
+		`container_cpu_usage_seconds_total{namespace="prod",pod=~"api|worker\\.1",container!="",image!=""}`,
+		`container_cpu_usage_seconds_total{namespace="qa",pod=~"job\"quoted",container!="",image!=""}`,
+		`container_memory_working_set_bytes{namespace="prod",pod=~"api|worker\\.1",container!="",image!=""}`,
+		`container_memory_working_set_bytes{namespace="qa",pod=~"job\"quoted",container!="",image!=""}`,
+	} {
+		found := queries[0].Query + "\n" + queries[1].Query
+		if !strings.Contains(found, want) {
+			t.Fatalf("prepared queries did not contain %q:\n%s", want, found)
+		}
 	}
 }
 

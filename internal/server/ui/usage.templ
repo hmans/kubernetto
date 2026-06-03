@@ -128,8 +128,6 @@ templ PodUsageSparklineCell(row kube.Row, state PageState) {
 			cluster-context={ sparklineContext(row, state) }
 			pod-namespace={ row.Namespace }
 			pod-name={ row.Name }
-			cpu-query={ kube.PodCPUQueryFor(row.Namespace, row.Name) }
-			memory-query={ kube.PodMemoryQueryFor(row.Namespace, row.Name) }
 		></kubernetto-promql-sparkline>
 	</td>
 }
