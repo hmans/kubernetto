@@ -8,7 +8,7 @@ export default defineConfig({
     emptyOutDir: true,
     outDir: "internal/server/ui/assets/dist",
     rollupOptions: {
-      input: "frontend/src/app.js",
+      input: "frontend/src/app.ts",
       output: {
         assetFileNames: (assetInfo) => {
           if (assetInfo.names?.some((name) => name.endsWith(".woff2"))) {
