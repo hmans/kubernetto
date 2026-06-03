@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"context"
+	"net/http"
+	"testing"
+)
 
 func TestResolveListenAddr(t *testing.T) {
 	tests := []struct {
@@ -82,5 +86,34 @@ func TestResolveListenAddr(t *testing.T) {
 				t.Fatalf("expected %q, got %q", tt.want, got)
 			}
 		})
+	}
+}
+
+func TestNewHTTPServerConfiguresTimeouts(t *testing.T) {
+	ctx := context.WithValue(context.Background(), "test-key", "test-value")
+	handler := http.NewServeMux()
+
+	srv := newHTTPServer("127.0.0.1:9832", handler, ctx)
+
+	if srv.Addr != "127.0.0.1:9832" {
+		t.Fatalf("addr = %q, want 127.0.0.1:9832", srv.Addr)
+	}
+	if srv.Handler != handler {
+		t.Fatalf("handler was not configured")
+	}
+	if srv.ReadHeaderTimeout != serverReadHeaderTimeout {
+		t.Fatalf("read header timeout = %s, want %s", srv.ReadHeaderTimeout, serverReadHeaderTimeout)
+	}
+	if srv.ReadTimeout != serverReadTimeout {
+		t.Fatalf("read timeout = %s, want %s", srv.ReadTimeout, serverReadTimeout)
+	}
+	if srv.WriteTimeout != serverWriteTimeout {
+		t.Fatalf("write timeout = %s, want %s", srv.WriteTimeout, serverWriteTimeout)
+	}
+	if srv.IdleTimeout != serverIdleTimeout {
+		t.Fatalf("idle timeout = %s, want %s", srv.IdleTimeout, serverIdleTimeout)
+	}
+	if got := srv.BaseContext(nil); got != ctx {
+		t.Fatalf("base context = %#v, want %#v", got, ctx)
 	}
 }

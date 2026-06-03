@@ -25,6 +25,13 @@ type serverOptions struct {
 	allowRemote bool
 }
 
+const (
+	serverReadHeaderTimeout = 5 * time.Second
+	serverReadTimeout       = 15 * time.Second
+	serverWriteTimeout      = 30 * time.Second
+	serverIdleTimeout       = 60 * time.Second
+)
+
 func main() {
 	if err := newRootCommand().Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -109,14 +116,7 @@ func runServer(addr, kubeconfig string) error {
 
 	app := server.New(clusters, ctx, logger)
 
-	srv := &http.Server{
-		Addr:              addr,
-		Handler:           app.Routes(),
-		ReadHeaderTimeout: 5 * time.Second,
-		BaseContext: func(net.Listener) context.Context {
-			return ctx
-		},
-	}
+	srv := newHTTPServer(addr, app.Routes(), ctx)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -138,4 +138,18 @@ func runServer(addr, kubeconfig string) error {
 	}
 
 	return nil
+}
+
+func newHTTPServer(addr string, handler http.Handler, baseCtx context.Context) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: serverReadHeaderTimeout,
+		ReadTimeout:       serverReadTimeout,
+		WriteTimeout:      serverWriteTimeout,
+		IdleTimeout:       serverIdleTimeout,
+		BaseContext: func(net.Listener) context.Context {
+			return baseCtx
+		},
+	}
 }
