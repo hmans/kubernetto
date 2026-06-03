@@ -6,7 +6,7 @@ watchexec = "latest"
 
 [tasks.dev]
 description = "Run Kubernetto and restart when source files change"
-run = "mise watch --restart --stop-signal TERM --map-signal HUP:TERM app"
+run = "./scripts/dev-watch"
 
 [tasks.build]
 description = "Build Kubernetto"

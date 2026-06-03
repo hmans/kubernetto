@@ -70,6 +70,9 @@ func TestHandleIndexDefaultsToClusterOverview(t *testing.T) {
 	if !strings.Contains(body, `data-signals:resource="&#34;overview&#34;"`) {
 		t.Fatalf("index did not render overview resource signal")
 	}
+	if !strings.Contains(body, `datastar@v1.0.2`) {
+		t.Fatalf("index did not render version-locked Datastar asset")
+	}
 	if !strings.Contains(body, "Cluster Overview") {
 		t.Fatalf("index did not render cluster overview")
 	}
@@ -91,6 +94,57 @@ func TestHandleIndexUsesQueryState(t *testing.T) {
 	}
 }
 
+func TestHandleIndexRendersGroupedResourceNav(t *testing.T) {
+	app := New(nil, context.Background(), nil)
+	req := httptest.NewRequest("GET", "/?resource=services", nil)
+	res := httptest.NewRecorder()
+
+	app.handleIndex(res, req)
+
+	body := res.Body.String()
+	for _, want := range []string{"resource-group-button", "Workloads", "Storage", "Network", "Security", "Configuration", "Cluster", "EndpointSlices"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("grouped nav did not contain %q", want)
+		}
+	}
+	if !strings.Contains(body, `data-resource-group-children="workloads" hidden`) {
+		t.Fatalf("inactive workloads children were not hidden")
+	}
+}
+
+func TestStateClearsNamespaceForClusterScopedExpandedResources(t *testing.T) {
+	app := New(nil, context.Background(), nil)
+	req := httptest.NewRequest("GET", "/?resource=storageclasses&namespace=prod&selectedName=fast&selectedNamespace=prod", nil)
+
+	state := app.state(readSignals(req))
+
+	if state.Signals.Namespace != "" {
+		t.Fatalf("namespace = %q, want cleared for cluster-scoped resource", state.Signals.Namespace)
+	}
+	if state.Signals.SelectedNamespace != "" {
+		t.Fatalf("selected namespace = %q, want cleared for cluster-scoped resource", state.Signals.SelectedNamespace)
+	}
+}
+
+func TestHandleTablePatchesNormalizedSignals(t *testing.T) {
+	app := New(nil, context.Background(), nil)
+	req := httptest.NewRequest("GET", "/ui/table?resource=storageclasses&namespace=prod&selectedName=fast&selectedNamespace=prod", nil)
+	res := httptest.NewRecorder()
+
+	app.handleTable(res, req)
+
+	body := res.Body.String()
+	if !strings.Contains(body, "event: datastar-patch-signals") {
+		t.Fatalf("table response did not patch signals")
+	}
+	if !strings.Contains(body, `data: signals {"context":"","resource":"storageclasses","namespace":"","query":"","sortColumn":"","sortOrder":"","selectedName":"fast","selectedNamespace":"","detailMode":"overview"}`) {
+		t.Fatalf("table response did not patch normalized signal state:\n%s", body)
+	}
+	if !strings.Contains(body, "event: datastar-patch-elements") {
+		t.Fatalf("table response did not patch elements")
+	}
+}
+
 func TestHandleIndexRendersTableAutoRefresh(t *testing.T) {
 	app := New(nil, context.Background(), nil)
 	req := httptest.NewRequest("GET", "/?resource=pods", nil)
@@ -104,6 +158,9 @@ func TestHandleIndexRendersTableAutoRefresh(t *testing.T) {
 	}
 	if !strings.Contains(body, `data-on-interval__duration.5s="@get(&#39;/ui/table&#39;)"`) {
 		t.Fatalf("index did not render table auto-refresh interval")
+	}
+	if !strings.Contains(body, `data-class:pending="$loading"`) || !strings.Contains(body, `data-show="$loading"`) {
+		t.Fatalf("index did not render loading state hooks")
 	}
 }
 

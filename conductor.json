@@ -1,7 +1,7 @@
 {
   "scripts": {
-    "setup": "mise trust && mise x -- pnpm install --frozen-lockfile",
-    "run": "mise dev --port \"$CONDUCTOR_PORT\""
+    "setup": "mise trust && mise install && mise x -- pnpm install --frozen-lockfile",
+    "run": "exec ./scripts/dev-watch --port \"$CONDUCTOR_PORT\""
   },
   "runScriptMode": "concurrent"
 }

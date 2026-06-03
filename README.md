@@ -42,7 +42,7 @@ go generate ./...
 
 - Cluster summary with live Data-Star SSE refresh.
 - Context switching across all contexts in the loaded kubeconfig.
-- Resource tables for pods, deployments, statefulsets, daemonsets, services, ingresses, nodes, and namespaces.
+- Grouped resource tables for common built-in Kubernetes workloads, storage, networking, security, configuration, and cluster resources.
 - Namespace filtering for namespaced resources.
 - Client-side signals with server-rendered table fragments.
 - Search across visible table cells.
