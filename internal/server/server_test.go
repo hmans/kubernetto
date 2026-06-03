@@ -152,6 +152,82 @@ func TestOverviewClusterFilterUsesSingleClusterOverview(t *testing.T) {
 	}
 }
 
+func TestHandleIndexRendersActionItemsPage(t *testing.T) {
+	app := New([]*kube.Cluster{
+		testClusterWithObjects("prod",
+			testNode("prod-node", false),
+			testPod("worker", corev1.PodFailed),
+			&corev1.Event{
+				ObjectMeta: metav1.ObjectMeta{Name: "worker-event", Namespace: "default"},
+				Type:       corev1.EventTypeWarning,
+				Reason:     "BackOff",
+				Message:    "retrying failed pod",
+				InvolvedObject: corev1.ObjectReference{
+					Kind:      "Pod",
+					Name:      "worker",
+					Namespace: "default",
+				},
+				Count: 2,
+			},
+		),
+	}, context.Background(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/?resource=actions", nil)
+	res := httptest.NewRecorder()
+
+	app.handleIndex(res, req)
+
+	body := res.Body.String()
+	for _, want := range []string{
+		`data-signals:resource="&#34;actions&#34;"`,
+		`Issues`,
+		`data-resource-kind="actions"`,
+		`BackOff`,
+		`retrying failed pod`,
+		`data-action-context="prod"`,
+		`data-action-kind="events"`,
+		`data-action-query="BackOff"`,
+		`data-action-selected-name="worker-event"`,
+		`data-action-selected-namespace="default"`,
+		`$selectedName = &#34;worker-event&#34;`,
+		`data-on-interval__duration.10s="@get(&#39;/ui/table&#39;)"`,
+		`Nodes ready 0/1`,
+		`Pods healthy 0/1`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("action items page did not render %q: %s", want, body)
+		}
+	}
+	if strings.Contains(body, `id="namespace"`) || strings.Contains(body, `id="query"`) {
+		t.Fatalf("action items page rendered table controls: %s", body)
+	}
+	if strings.Contains(body, `>Refresh<`) {
+		t.Fatalf("action items page rendered a manual refresh button: %s", body)
+	}
+}
+
+func TestActionItemsIgnoreSucceededPods(t *testing.T) {
+	app := New([]*kube.Cluster{
+		testClusterWithObjects("prod",
+			testNode("prod-node", true),
+			testPod("completed-job", corev1.PodSucceeded),
+		),
+	}, context.Background(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/?resource=actions", nil)
+	res := httptest.NewRecorder()
+
+	app.handleIndex(res, req)
+
+	body := res.Body.String()
+	if !strings.Contains(body, "No current issues") {
+		t.Fatalf("action items page did not render empty state: %s", body)
+	}
+	for _, unwanted := range []string{"Pods healthy", "completed-job", "Open pods"} {
+		if strings.Contains(body, unwanted) {
+			t.Fatalf("action items page rendered non-actionable succeeded pod marker %q: %s", unwanted, body)
+		}
+	}
+}
+
 func TestHandleIndexUsesQueryState(t *testing.T) {
 	app := New(nil, context.Background(), nil)
 	req := httptest.NewRequest("GET", "/?resource=deployments&query=api", nil)
@@ -176,7 +252,7 @@ func TestHandleIndexRendersGroupedResourceNav(t *testing.T) {
 	app.handleIndex(res, req)
 
 	body := res.Body.String()
-	for _, want := range []string{"resource-group-button", "Workloads", "Storage", "Network", "Security", "Configuration", "Cluster", "EndpointSlices"} {
+	for _, want := range []string{"resource-group-button", "Issues", "Workloads", "Storage", "Network", "Security", "Configuration", "Cluster", "EndpointSlices"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("grouped nav did not contain %q", want)
 		}

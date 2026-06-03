@@ -191,7 +191,7 @@ func ResourceControlsView(state PageState) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		if !isOverview(state) {
+		if !isStandalonePage(state) {
 			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "<section class=\"grid items-end gap-2.5 rounded-lg border border-[var(--line)] bg-[var(--panel)] p-3 shadow-[var(--shadow)] grid-cols-[minmax(160px,260px)_minmax(180px,1fr)_auto] max-[860px]:grid-cols-1\" aria-label=\"Table controls\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
@@ -298,6 +298,11 @@ func ContentView(state PageState) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
+		} else if isActionItems(state) {
+			templ_7745c5c3_Err = ActionItemsView(state).Render(ctx, templ_7745c5c3_Buffer)
+			if templ_7745c5c3_Err != nil {
+				return templ_7745c5c3_Err
+			}
 		} else {
 			templ_7745c5c3_Err = TableView(state).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
@@ -355,7 +360,7 @@ func ResourceNavView(state PageState) templ.Component {
 			var templ_7745c5c3_Var11 string
 			templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.ResolveAttributeValue(group.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `page.templ`, Line: 101, Col: 65}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `page.templ`, Line: 103, Col: 65}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var11)
 			if templ_7745c5c3_Err != nil {
@@ -368,7 +373,7 @@ func ResourceNavView(state PageState) templ.Component {
 			var templ_7745c5c3_Var12 string
 			templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.ResolveAttributeValue(checkedBool(resourceGroupActive(group, state.Signals.Resource)))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `page.templ`, Line: 105, Col: 83}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `page.templ`, Line: 107, Col: 83}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var12)
 			if templ_7745c5c3_Err != nil {
@@ -411,7 +416,7 @@ func ResourceNavView(state PageState) templ.Component {
 			var templ_7745c5c3_Var15 string
 			templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(group.Label)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `page.templ`, Line: 109, Col: 24}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `page.templ`, Line: 111, Col: 24}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
 			if templ_7745c5c3_Err != nil {
@@ -429,7 +434,7 @@ func ResourceNavView(state PageState) templ.Component {
 				var templ_7745c5c3_Var16 string
 				templ_7745c5c3_Var16, templ_7745c5c3_Err = templ.ResolveAttributeValue(group.ID)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `page.templ`, Line: 112, Col: 79}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `page.templ`, Line: 114, Col: 79}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var16)
 				if templ_7745c5c3_Err != nil {
@@ -457,7 +462,7 @@ func ResourceNavView(state PageState) templ.Component {
 					var templ_7745c5c3_Var17 string
 					templ_7745c5c3_Var17, templ_7745c5c3_Err = templ.ResolveAttributeValue(checked(state.Signals.Resource, string(resource.Kind)))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `page.templ`, Line: 117, Col: 77}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `page.templ`, Line: 119, Col: 77}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var17)
 					if templ_7745c5c3_Err != nil {
@@ -478,7 +483,7 @@ func ResourceNavView(state PageState) templ.Component {
 					var templ_7745c5c3_Var18 string
 					templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinStringErrs(resource.Label)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `page.templ`, Line: 120, Col: 30}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `page.templ`, Line: 122, Col: 30}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
 					if templ_7745c5c3_Err != nil {
@@ -558,7 +563,7 @@ func ClusterFilterView(state PageState) templ.Component {
 			var templ_7745c5c3_Var20 string
 			templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinStringErrs(cluster.ContextName)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `page.templ`, Line: 135, Col: 31}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `page.templ`, Line: 137, Col: 31}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
 			if templ_7745c5c3_Err != nil {

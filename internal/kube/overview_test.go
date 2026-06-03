@@ -78,10 +78,10 @@ func TestResourceStoreOverviewSummarizesClusterHealth(t *testing.T) {
 		t.Fatalf("node health = %q", got)
 	}
 	assertOverviewMetricRatio(t, overview.Stats, "Nodes ready", 50)
-	if got := overviewMetricValue(overview.Stats, "Pods healthy"); got != "1/3" {
+	if got := overviewMetricValue(overview.Stats, "Pods healthy"); got != "1/2" {
 		t.Fatalf("pod health = %q", got)
 	}
-	assertOverviewMetricRatio(t, overview.Stats, "Pods healthy", 100.0/3.0)
+	assertOverviewMetricRatio(t, overview.Stats, "Pods healthy", 50)
 	if got := overviewMetricValue(overview.Stats, "Workloads ready"); got != "0/1" {
 		t.Fatalf("workload health = %q", got)
 	}
@@ -102,6 +102,29 @@ func TestResourceStoreOverviewSummarizesClusterHealth(t *testing.T) {
 	}
 	if event := overview.WarningEvents[0]; event.Reason != "BackOff" || event.InvolvedObject != "Pod/api" || event.Count != 3 {
 		t.Fatalf("warning event = %#v", event)
+	}
+}
+
+func TestEventTimestampUsesLatestObservedTime(t *testing.T) {
+	now := time.Now()
+	event := corev1.Event{
+		EventTime:      metav1.MicroTime{Time: now.Add(-30 * time.Minute)},
+		FirstTimestamp: metav1.NewTime(now.Add(-45 * time.Minute)),
+		LastTimestamp:  metav1.NewTime(now.Add(-20 * time.Minute)),
+		Series:         &corev1.EventSeries{LastObservedTime: metav1.MicroTime{Time: now.Add(-2 * time.Minute)}},
+	}
+
+	if got := eventTimestamp(event); got.Sub(now.Add(-2*time.Minute)) > time.Second || got.Sub(now.Add(-2*time.Minute)) < -time.Second {
+		t.Fatalf("event timestamp = %s, want latest observed time", got)
+	}
+}
+
+func TestAgeFormatsRelativeTime(t *testing.T) {
+	if got := age(time.Now().Add(5 * time.Second)); got != "just now" {
+		t.Fatalf("future age = %q, want just now", got)
+	}
+	if got := age(time.Now().Add(-2 * time.Minute)); got != "2m ago" {
+		t.Fatalf("minute age = %q, want 2m ago", got)
 	}
 }
 
