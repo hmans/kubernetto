@@ -5,6 +5,7 @@ const themeKey = "kubernetto-theme";
 const themeOptions = new Set(["auto", "light", "dark"]);
 const urlStateKeys = [
   "context",
+  "clusters",
   "resource",
   "namespace",
   "query",
@@ -23,6 +24,7 @@ type UrlSyncOptions = {
 
 const defaultUrlState: UrlState = {
   context: "",
+  clusters: "",
   resource: "overview",
   namespace: "",
   query: "",
@@ -70,7 +72,8 @@ function readDOMState(): UrlStatePatch {
   const context = document.querySelector<HTMLSelectElement>("#context");
   const namespace = document.querySelector<HTMLSelectElement>("#namespace");
   const query = document.querySelector<HTMLInputElement>("#query");
-  const activeResource = document.querySelector<HTMLElement>("[data-resource-kind][aria-pressed='true']");
+  const clusters = activeClusterSelection();
+  const activeResource = activeResourceButton();
   const activeSort = document.querySelector<HTMLElement>("th[aria-sort='ascending'] [data-sort-column], th[aria-sort='descending'] [data-sort-column]");
   const selectedRow = document.querySelector<HTMLElement>("tr[data-selected='true'][data-row-name]");
   const activeDetailMode = document.querySelector<HTMLElement>("[data-detail-mode][aria-selected='true']");
@@ -86,6 +89,9 @@ function readDOMState(): UrlStatePatch {
   if (query) {
     state.query = query.value;
   }
+  if (clusters !== null) {
+    state.clusters = clusters;
+  }
   if (activeResource) {
     state.resource = activeResource.dataset.resourceKind || "";
   }
@@ -99,12 +105,43 @@ function readDOMState(): UrlStatePatch {
   if (selectedRow) {
     state.selectedName = selectedRow.dataset.rowName || "";
     state.selectedNamespace = selectedRow.dataset.rowNamespace || "";
+    if (selectedRow.dataset.rowCluster) {
+      state.context = selectedRow.dataset.rowCluster;
+    }
   }
   if (activeDetailMode) {
     state.detailMode = activeDetailMode.dataset.detailMode || "overview";
   }
 
   return normalizeUrlState(state);
+}
+
+function activeClusterSelection(): string | null {
+  const buttons = Array.from(document.querySelectorAll<HTMLElement>("[data-cluster-context]"));
+  if (!buttons.length) {
+    return null;
+  }
+  const active = buttons
+    .filter((button) => button.getAttribute("aria-pressed") === "true")
+    .map((button) => button.dataset.clusterContext || "")
+    .filter(Boolean);
+  return clusterSelectionUrlValue(active.join(","));
+}
+
+function activeResourceButton(): HTMLElement | null {
+  return document.querySelector<HTMLElement>(".resource-child-button[data-resource-kind][aria-pressed='true']")
+    || document.querySelector<HTMLElement>(".resource-group-button[data-resource-kind][aria-pressed='true']");
+}
+
+function clusterSelectionUrlValue(value: string): string {
+  const selected = String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (!selected.length) {
+    return "";
+  }
+  return selected.join(",");
 }
 
 function normalizeUrlState(state: UrlStatePatch): UrlState {
@@ -257,6 +294,17 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  const clusterButton = target.closest<HTMLElement>("[data-cluster-context]");
+  if (clusterButton) {
+    syncUrlState({
+      clusters: clusterSelectionUrlValue(clusterButton.dataset.clusterSelection || ""),
+      selectedName: "",
+      selectedNamespace: "",
+      detailMode: "overview",
+    }, { mode: "push" });
+    return;
+  }
+
   const sortButton = target.closest<HTMLElement>("[data-sort-column]");
   if (sortButton) {
     syncUrlState({
@@ -270,11 +318,15 @@ document.addEventListener("click", (event) => {
 
   const row = target.closest<HTMLElement>("tr[data-row-name]");
   if (row) {
-    syncUrlState({
+    const patch: UrlStatePatch = {
       selectedName: row.dataset.rowName || "",
       selectedNamespace: row.dataset.rowNamespace || "",
       detailMode: "overview",
-    }, { mode: "push" });
+    };
+    if (row.dataset.rowCluster) {
+      patch.context = row.dataset.rowCluster;
+    }
+    syncUrlState(patch, { mode: "push" });
     return;
   }
 
@@ -301,11 +353,15 @@ document.addEventListener("keydown", (event) => {
   if (!row) {
     return;
   }
-  syncUrlState({
+  const patch: UrlStatePatch = {
     selectedName: row.dataset.rowName || "",
     selectedNamespace: row.dataset.rowNamespace || "",
     detailMode: "overview",
-  }, { mode: "push" });
+  };
+  if (row.dataset.rowCluster) {
+    patch.context = row.dataset.rowCluster;
+  }
+  syncUrlState(patch, { mode: "push" });
 });
 
 document.addEventListener("change", (event) => {

@@ -356,7 +356,7 @@ func (s *ResourceStore) TableWithSort(kind ResourceKind, namespace, query, sortC
 			}
 		}
 	case KindDeployments:
-		table.Columns = []string{"Name", "Namespace", "Ready", "Up-to-date", "Available", "CPU", "CPU Req", "CPU Limit", "MEM", "MEM Req", "MEM Limit", "Age"}
+		table.Columns = []string{"Name", "Namespace", "Replicas", "CPU", "CPU Req", "CPU Limit", "MEM", "MEM Req", "MEM Limit", "Age"}
 		for _, deployment := range s.listDeployments(namespace) {
 			row := deploymentRow(*deployment, s.podUsageForSelector(deployment.Namespace, deployment.Spec.Selector))
 			if matches(row, query) {
@@ -364,7 +364,7 @@ func (s *ResourceStore) TableWithSort(kind ResourceKind, namespace, query, sortC
 			}
 		}
 	case KindStatefulSet:
-		table.Columns = []string{"Name", "Namespace", "Ready", "Replicas", "CPU", "CPU Req", "CPU Limit", "MEM", "MEM Req", "MEM Limit", "Age"}
+		table.Columns = []string{"Name", "Namespace", "Replicas", "CPU", "CPU Req", "CPU Limit", "MEM", "MEM Req", "MEM Limit", "Age"}
 		for _, statefulSet := range s.listStatefulSets(namespace) {
 			row := statefulSetRow(*statefulSet, s.podUsageForSelector(statefulSet.Namespace, statefulSet.Spec.Selector))
 			if matches(row, query) {
@@ -372,7 +372,7 @@ func (s *ResourceStore) TableWithSort(kind ResourceKind, namespace, query, sortC
 			}
 		}
 	case KindDaemonSet:
-		table.Columns = []string{"Name", "Namespace", "Desired", "Ready", "Available", "CPU", "CPU Req", "CPU Limit", "MEM", "MEM Req", "MEM Limit", "Age"}
+		table.Columns = []string{"Name", "Namespace", "Replicas", "CPU", "CPU Req", "CPU Limit", "MEM", "MEM Req", "MEM Limit", "Age"}
 		for _, daemonSet := range s.listDaemonSets(namespace) {
 			row := daemonSetRow(*daemonSet, s.podUsageForSelector(daemonSet.Namespace, daemonSet.Spec.Selector))
 			if matches(row, query) {
@@ -380,7 +380,7 @@ func (s *ResourceStore) TableWithSort(kind ResourceKind, namespace, query, sortC
 			}
 		}
 	case KindReplicaSets:
-		table.Columns = []string{"Name", "Namespace", "Desired", "Current", "Ready", "Age"}
+		table.Columns = []string{"Name", "Namespace", "Replicas", "Age"}
 		for _, replicaSet := range s.listReplicaSets(namespace) {
 			row := replicaSetRow(*replicaSet)
 			if matches(row, query) {

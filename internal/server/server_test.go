@@ -15,16 +15,20 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
 func TestReadSignalsFromQuery(t *testing.T) {
-	req := httptest.NewRequest("GET", "/?context=kind-local&resource=deployments&namespace=prod&query=api&sortColumn=Name&sortOrder=desc&selectedName=api&selectedNamespace=prod&detailMode=yaml", nil)
+	req := httptest.NewRequest("GET", "/?context=kind-local&clusters=kind-local,prod-west&resource=deployments&namespace=prod&query=api&sortColumn=Name&sortOrder=desc&selectedName=api&selectedNamespace=prod&detailMode=yaml", nil)
 
 	signals := readSignals(req)
 
 	if signals.Context != "kind-local" {
 		t.Fatalf("context = %q, want kind-local", signals.Context)
+	}
+	if signals.Clusters != "kind-local,prod-west" {
+		t.Fatalf("clusters = %q, want kind-local,prod-west", signals.Clusters)
 	}
 	if signals.Resource != "deployments" {
 		t.Fatalf("resource = %q, want deployments", signals.Resource)
@@ -112,6 +116,25 @@ func TestHandleIndexRendersGroupedResourceNav(t *testing.T) {
 	}
 }
 
+func TestHandleIndexOmitsClusterSummaryOnResourcePages(t *testing.T) {
+	app := New([]*kube.Cluster{testCluster()}, context.Background(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/?resource=pods", nil)
+	res := httptest.NewRecorder()
+
+	app.handleIndex(res, req)
+
+	body := res.Body.String()
+	if strings.Contains(body, `id="summary"`) {
+		t.Fatalf("resource page rendered overview summary cards")
+	}
+	if strings.Contains(body, `data-on-interval__duration.5s="@get(&#39;/ui/summary&#39;)"`) {
+		t.Fatalf("resource page rendered summary auto-refresh interval")
+	}
+	if !strings.Contains(body, `data-on-interval__duration.5s="@get(&#39;/ui/table&#39;)"`) {
+		t.Fatalf("resource page did not keep table auto-refresh interval")
+	}
+}
+
 func TestStateClearsNamespaceForClusterScopedExpandedResources(t *testing.T) {
 	app := New(nil, context.Background(), nil)
 	req := httptest.NewRequest("GET", "/?resource=storageclasses&namespace=prod&selectedName=fast&selectedNamespace=prod", nil)
@@ -137,11 +160,160 @@ func TestHandleTablePatchesNormalizedSignals(t *testing.T) {
 	if !strings.Contains(body, "event: datastar-patch-signals") {
 		t.Fatalf("table response did not patch signals")
 	}
-	if !strings.Contains(body, `data: signals {"context":"","resource":"storageclasses","namespace":"","query":"","sortColumn":"","sortOrder":"","selectedName":"fast","selectedNamespace":"","detailMode":"overview"}`) {
+	if !strings.Contains(body, `data: signals {"context":"","clusters":"","resource":"storageclasses","namespace":"","query":"","sortColumn":"","sortOrder":"","selectedName":"fast","selectedNamespace":"","detailMode":"overview"}`) {
 		t.Fatalf("table response did not patch normalized signal state:\n%s", body)
 	}
 	if !strings.Contains(body, "event: datastar-patch-elements") {
 		t.Fatalf("table response did not patch elements")
+	}
+}
+
+func TestHandleTablePatchesPageChromeForNavigation(t *testing.T) {
+	app := New([]*kube.Cluster{testCluster()}, context.Background(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/ui/table?resource=deployments", nil)
+	res := httptest.NewRecorder()
+
+	app.handleTable(res, req)
+
+	body := res.Body.String()
+	for _, want := range []string{
+		`id="page-title"`,
+		`>Deployments</h1>`,
+		`id="summary-slot"`,
+		`id="resource-controls"`,
+		`aria-label="Table controls"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("table navigation response did not patch %q:\n%s", want, body)
+		}
+	}
+}
+
+func TestMultiClusterTableAggregatesRowsWithClusterColumn(t *testing.T) {
+	app := New([]*kube.Cluster{
+		testClusterWithPod("dev", "api"),
+		testClusterWithPod("prod", "worker"),
+	}, context.Background(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/ui/table?resource=pods", nil)
+	signals := readSignals(req)
+
+	state := app.state(signals)
+
+	if state.Signals.Clusters != "" {
+		t.Fatalf("clusters signal = %q, want empty no-filter state", state.Signals.Clusters)
+	}
+	if len(state.Table.Columns) == 0 || state.Table.Columns[0] != "Cluster" {
+		t.Fatalf("first table column = %#v, want Cluster", state.Table.Columns)
+	}
+	if len(state.Table.Rows) != 2 {
+		t.Fatalf("rows = %d, want 2: %#v", len(state.Table.Rows), state.Table.Rows)
+	}
+	seen := map[string]string{}
+	for _, row := range state.Table.Rows {
+		seen[row.Name] = row.Cluster
+		if len(row.Cells) == 0 || row.Cells[0].Value != row.Cluster {
+			t.Fatalf("row %q did not expose cluster cell: %#v", row.Name, row.Cells)
+		}
+	}
+	if seen["api"] != "dev" || seen["worker"] != "prod" {
+		t.Fatalf("row cluster mapping = %#v, want api/dev and worker/prod", seen)
+	}
+}
+
+func TestMultiClusterTableCanFilterByCluster(t *testing.T) {
+	app := New([]*kube.Cluster{
+		testClusterWithPod("dev", "api"),
+		testClusterWithPod("prod", "worker"),
+	}, context.Background(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/ui/table?resource=pods&query=prod", nil)
+
+	state := app.state(readSignals(req))
+
+	if len(state.Table.Rows) != 1 {
+		t.Fatalf("rows = %d, want 1: %#v", len(state.Table.Rows), state.Table.Rows)
+	}
+	if state.Table.Rows[0].Name != "worker" || state.Table.Rows[0].Cluster != "prod" {
+		t.Fatalf("filtered row = %#v, want prod worker", state.Table.Rows[0])
+	}
+}
+
+func TestMultiClusterTableKeepsClusterColumnWhenOneClusterIsActive(t *testing.T) {
+	app := New([]*kube.Cluster{
+		testClusterWithPod("dev", "api"),
+		testClusterWithPod("prod", "worker"),
+	}, context.Background(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/ui/table?resource=pods&clusters=prod", nil)
+
+	state := app.state(readSignals(req))
+
+	if state.Signals.Clusters != "prod" {
+		t.Fatalf("clusters signal = %q, want prod", state.Signals.Clusters)
+	}
+	if len(state.Table.Columns) == 0 || state.Table.Columns[0] != "Cluster" {
+		t.Fatalf("first table column = %#v, want Cluster", state.Table.Columns)
+	}
+	if len(state.Table.Rows) != 1 || state.Table.Rows[0].Cluster != "prod" {
+		t.Fatalf("rows = %#v, want one prod row", state.Table.Rows)
+	}
+}
+
+func TestHandleIndexRendersClusterFiltersForMultiClusterTables(t *testing.T) {
+	app := New([]*kube.Cluster{
+		testClusterWithPod("dev", "api"),
+		testClusterWithPod("prod", "worker"),
+	}, context.Background(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/?resource=pods", nil)
+	res := httptest.NewRecorder()
+
+	app.handleIndex(res, req)
+
+	body := res.Body.String()
+	for _, want := range []string{
+		`id="cluster-filters"`,
+		`class="cluster-filter"`,
+		`dev`,
+		`prod`,
+		`data-row-cluster="dev"`,
+		`data-row-cluster="prod"`,
+		`cluster-context="dev"`,
+		`cluster-context="prod"`,
+		`data-cluster-context="dev"`,
+		`data-cluster-context="prod"`,
+		`data-cluster-selection="dev"`,
+		`data-cluster-selection="prod"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("multi-cluster table did not render %q: %s", want, body)
+		}
+	}
+	if strings.Contains(body, `class="cluster-filter active"`) {
+		t.Fatalf("multi-cluster no-filter state rendered active cluster pill: %s", body)
+	}
+}
+
+func TestHandleIndexRendersExplicitClusterFilterSelection(t *testing.T) {
+	app := New([]*kube.Cluster{
+		testClusterWithPod("dev", "api"),
+		testClusterWithPod("prod", "worker"),
+	}, context.Background(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/?resource=pods&clusters=dev", nil)
+	res := httptest.NewRecorder()
+
+	app.handleIndex(res, req)
+
+	body := res.Body.String()
+	for _, want := range []string{
+		`class="cluster-filter active"`,
+		`data-cluster-selection=""`,
+		`data-cluster-selection="dev,prod"`,
+		`data-row-cluster="dev"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("explicit cluster filter did not render %q: %s", want, body)
+		}
+	}
+	if strings.Contains(body, `data-row-cluster="prod"`) {
+		t.Fatalf("explicit dev cluster filter rendered prod rows: %s", body)
 	}
 }
 
@@ -228,6 +400,33 @@ func TestPodTableRendersLazySparklineCells(t *testing.T) {
 	}
 }
 
+func TestPodTableDimsSucceededRows(t *testing.T) {
+	app := New([]*kube.Cluster{
+		testClusterWithPods("test",
+			testPod("api", corev1.PodRunning),
+			testPod("backup", corev1.PodSucceeded),
+		),
+	}, context.Background(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/ui/table?resource=pods&namespace=default", nil)
+	res := httptest.NewRecorder()
+
+	app.Routes().ServeHTTP(res, req)
+
+	body := res.Body.String()
+	for _, want := range []string{
+		`data-row-name="api"`,
+		`data-row-name="backup"`,
+		`class="terminal-success"`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("pod table did not render %q: %s", want, body)
+		}
+	}
+	if count := strings.Count(body, `class="terminal-success"`); count != 1 {
+		t.Fatalf("terminal success row count = %d, want 1: %s", count, body)
+	}
+}
+
 func TestChartEndpointsRenderPatchFragments(t *testing.T) {
 	app := New(nil, context.Background(), nil)
 	detailQuery := url.Values{
@@ -301,27 +500,43 @@ func TestPrometheusQueryRangeEndpointReturnsCompressedJSON(t *testing.T) {
 }
 
 func testCluster() *kube.Cluster {
-	clientset := fake.NewSimpleClientset(
+	return testClusterWithPod("test", "api")
+}
+
+func testClusterWithPod(contextName, podName string) *kube.Cluster {
+	return testClusterWithPods(contextName, testPod(podName, corev1.PodRunning))
+}
+
+func testClusterWithPods(contextName string, pods ...*corev1.Pod) *kube.Cluster {
+	objects := []runtime.Object{
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "default"}},
-		&corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "default"},
-			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "api"}}},
-			Status: corev1.PodStatus{
-				Phase: corev1.PodRunning,
-				ContainerStatuses: []corev1.ContainerStatus{
-					{Name: "api", Ready: true},
-				},
-			},
-		},
-	)
+	}
+	for _, pod := range pods {
+		objects = append(objects, pod)
+	}
+	clientset := fake.NewSimpleClientset(objects...)
 	return &kube.Cluster{
 		Clientset:    clientset,
 		Discovery:    clientset.Discovery(),
-		ContextName:  "test",
-		ClusterName:  "test",
+		ContextName:  contextName,
+		ClusterName:  contextName,
 		Namespace:    "default",
 		ConfigSource: "test",
-		Current:      true,
+		Current:      contextName == "test" || contextName == "dev",
+	}
+}
+
+func testPod(name string, phase corev1.PodPhase) *corev1.Pod {
+	ready := phase == corev1.PodRunning
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: name}}},
+		Status: corev1.PodStatus{
+			Phase: phase,
+			ContainerStatuses: []corev1.ContainerStatus{
+				{Name: name, Ready: ready},
+			},
+		},
 	}
 }
 

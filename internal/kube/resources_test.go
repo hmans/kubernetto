@@ -37,3 +37,13 @@ func TestNormalizeKindFallsBackToOverview(t *testing.T) {
 		t.Fatalf("NormalizeKind fallback = %q, want %q", got, KindOverview)
 	}
 }
+
+func TestReplicaSummaryCellCompactsHealthyAndDivergentDetails(t *testing.T) {
+	if got, want := replicaSummaryCell(3, 3, "good", replicaDetail(3, "upd"), replicaDetail(3, "avail")).Value, "3/3 ready"; got != want {
+		t.Fatalf("healthy replica summary = %q, want %q", got, want)
+	}
+
+	if got, want := replicaSummaryCell(2, 3, "warn", replicaDetail(1, "upd"), replicaDetail(2, "avail")).Value, "2/3 ready · upd 1 · avail 2"; got != want {
+		t.Fatalf("degraded replica summary = %q, want %q", got, want)
+	}
+}

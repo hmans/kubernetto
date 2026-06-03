@@ -20,16 +20,17 @@ import (
 )
 
 type PageState struct {
-	Cluster      *kube.Cluster
-	Clusters     []*kube.Cluster
-	Resources    []kube.ResourceDef
-	Signals      Signals
-	Summary      kube.Summary
-	Overview     kube.ClusterOverview
-	Table        kube.Table
-	Detail       kube.ResourceDetail
-	Namespaces   []string
-	NamespaceErr string
+	Cluster        *kube.Cluster
+	Clusters       []*kube.Cluster
+	ActiveContexts []string
+	Resources      []kube.ResourceDef
+	Signals        Signals
+	Summary        kube.Summary
+	Overview       kube.ClusterOverview
+	Table          kube.Table
+	Detail         kube.ResourceDetail
+	Namespaces     []string
+	NamespaceErr   string
 }
 
 type ResourceNavGroup struct {
@@ -41,6 +42,7 @@ type ResourceNavGroup struct {
 
 type Signals struct {
 	Context           string `json:"context"`
+	Clusters          string `json:"clusters"`
 	Resource          string `json:"resource"`
 	Namespace         string `json:"namespace"`
 	Query             string `json:"query"`
@@ -105,6 +107,13 @@ func isOverview(state PageState) bool {
 	return state.Signals.Resource == string(kube.KindOverview)
 }
 
+func pageTitle(state PageState) string {
+	if isOverview(state) {
+		return "Cluster Dashboard"
+	}
+	return state.Table.Label
+}
+
 func contentGridClass(state PageState) string {
 	if hasDetail(state) {
 		return "content-grid has-detail"
@@ -113,8 +122,9 @@ func contentGridClass(state PageState) string {
 }
 
 func appSignalAttrs(state PageState) templ.Attributes {
-	return templ.Attributes{
+	attrs := templ.Attributes{
 		"data-signals:context":            signalLiteral(state.Signals.Context),
+		"data-signals:clusters":           signalLiteral(state.Signals.Clusters),
 		"data-signals:resource":           signalLiteral(state.Signals.Resource),
 		"data-signals:namespace":          signalLiteral(state.Signals.Namespace),
 		"data-signals:query":              signalLiteral(state.Signals.Query),
@@ -124,8 +134,11 @@ func appSignalAttrs(state PageState) templ.Attributes {
 		"data-signals:selected-namespace": signalLiteral(state.Signals.SelectedNamespace),
 		"data-signals:detail-mode":        signalLiteral(state.Signals.DetailMode),
 		"data-signals:loading":            "false",
-		"data-on-interval__duration.5s":   "@get('/ui/summary')",
 	}
+	if isOverview(state) {
+		attrs["data-on-interval__duration.5s"] = "@get('/ui/summary')"
+	}
+	return attrs
 }
 
 func tableAutoRefreshAttrs(state PageState) templ.Attributes {
@@ -338,6 +351,13 @@ func hasPodSparklines(state PageState) bool {
 	return state.Table.Kind == kube.KindPods
 }
 
+func sparklineContext(row kube.Row, state PageState) string {
+	if row.Cluster != "" {
+		return row.Cluster
+	}
+	return state.Signals.Context
+}
+
 func detailPodUsagePanelID(namespace, name string) string {
 	value := "detail-pod-usage"
 	if namespace != "" {
@@ -419,12 +439,59 @@ func namespaceSelectAttrs() templ.Attributes {
 	}
 }
 
-func contextSelectAttrs() templ.Attributes {
+func clusterFilterAttrs(cluster *kube.Cluster, state PageState) templ.Attributes {
+	active := clusterActive(cluster.ContextName, selectedClusterContexts(state.Signals.Clusters))
 	return templ.Attributes{
+		"type":                   "button",
+		"class":                  clusterFilterClass(active),
+		"aria-pressed":           checkedBool(active),
+		"data-cluster-context":   cluster.ContextName,
+		"data-cluster-selection": toggledClusters(cluster.ContextName, state),
 		"data-indicator:loading": true,
-		"data-bind:context":      true,
-		"data-on:change":         "$namespace = ''; $sortColumn = ''; $sortOrder = ''; $selectedName = ''; $selectedNamespace = ''; $detailMode = 'overview'; @get('/ui/refresh')",
+		"data-on:click":          "$clusters = " + signalLiteral(toggledClusters(cluster.ContextName, state)) + "; $selectedName = ''; $selectedNamespace = ''; $detailMode = 'overview'; @get('/ui/table')",
 	}
+}
+
+func clusterFilterClass(active bool) string {
+	if active {
+		return "cluster-filter active"
+	}
+	return "cluster-filter"
+}
+
+func clusterActive(contextName string, activeContexts []string) bool {
+	for _, active := range activeContexts {
+		if active == contextName {
+			return true
+		}
+	}
+	return false
+}
+
+func toggledClusters(contextName string, state PageState) string {
+	active := map[string]bool{}
+	for _, value := range selectedClusterContexts(state.Signals.Clusters) {
+		active[value] = true
+	}
+	active[contextName] = !active[contextName]
+	values := []string{}
+	for _, cluster := range state.Clusters {
+		if cluster != nil && active[cluster.ContextName] {
+			values = append(values, cluster.ContextName)
+		}
+	}
+	return strings.Join(values, ",")
+}
+
+func selectedClusterContexts(value string) []string {
+	values := []string{}
+	for _, contextName := range strings.Split(value, ",") {
+		contextName = strings.TrimSpace(contextName)
+		if contextName != "" {
+			values = append(values, contextName)
+		}
+	}
+	return values
 }
 
 func searchInputAttrs() templ.Attributes {
@@ -568,17 +635,26 @@ func progressAttrs() templ.Attributes {
 }
 
 func rowAttrs(row kube.Row, state PageState) templ.Attributes {
-	return templ.Attributes{
+	contextName := state.Signals.Context
+	if row.Cluster != "" {
+		contextName = row.Cluster
+	}
+	attrs := templ.Attributes{
 		"role":                   "button",
 		"tabindex":               "0",
 		"aria-selected":          checkedBool(selectedRow(row, state)),
 		"data-selected":          checkedBool(selectedRow(row, state)),
 		"data-row-name":          row.Name,
 		"data-row-namespace":     row.Namespace,
+		"data-row-cluster":       row.Cluster,
 		"data-indicator:loading": true,
-		"data-on:click":          "$selectedName = " + signalLiteral(row.Name) + "; $selectedNamespace = " + signalLiteral(row.Namespace) + "; $detailMode = 'overview'; @get('/ui/selection')",
-		"data-on:keydown__enter": "$selectedName = " + signalLiteral(row.Name) + "; $selectedNamespace = " + signalLiteral(row.Namespace) + "; $detailMode = 'overview'; @get('/ui/selection')",
+		"data-on:click":          "$context = " + signalLiteral(contextName) + "; $selectedName = " + signalLiteral(row.Name) + "; $selectedNamespace = " + signalLiteral(row.Namespace) + "; $detailMode = 'overview'; @get('/ui/selection')",
+		"data-on:keydown__enter": "$context = " + signalLiteral(contextName) + "; $selectedName = " + signalLiteral(row.Name) + "; $selectedNamespace = " + signalLiteral(row.Namespace) + "; $detailMode = 'overview'; @get('/ui/selection')",
 	}
+	if class := rowClass(row, state); class != "" {
+		attrs["class"] = class
+	}
+	return attrs
 }
 
 func closeDetailAttrs() templ.Attributes {
@@ -602,7 +678,25 @@ func detailTabAttrs(mode string, state PageState) templ.Attributes {
 }
 
 func selectedRow(row kube.Row, state PageState) bool {
-	return row.Name == state.Signals.SelectedName && row.Namespace == state.Signals.SelectedNamespace
+	return row.Name == state.Signals.SelectedName && row.Namespace == state.Signals.SelectedNamespace && (row.Cluster == "" || row.Cluster == state.Signals.Context)
+}
+
+func rowClass(row kube.Row, state PageState) string {
+	if terminalSuccessfulRow(row, state) {
+		return "terminal-success"
+	}
+	return ""
+}
+
+func terminalSuccessfulRow(row kube.Row, state PageState) bool {
+	switch state.Table.Kind {
+	case kube.KindPods:
+		return strings.EqualFold(row.Status, "Succeeded")
+	case kube.KindJobs:
+		return row.StatusKey == "good"
+	default:
+		return false
+	}
 }
 
 func formatTimestamp(t time.Time) string {

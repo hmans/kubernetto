@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -59,7 +60,9 @@ func New(clusters []*kube.Cluster, ctx context.Context, logger *slog.Logger) *Se
 			app.defaultContext = cluster.ContextName
 		}
 	}
-	app.ensureStore(app.defaultContext)
+	for _, session := range app.clusters {
+		app.ensureSessionStore(session)
+	}
 	return app
 }
 
@@ -91,9 +94,10 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	state := s.state(signals)
 	sse := datastar.NewSSE(w, r)
 	s.patchSignals(sse, state.Signals)
+	s.patchElements(sse, "page title", ui.RenderFragment(ui.PageTitleView(state)))
 	s.patchElements(sse, "resource nav", ui.RenderFragment(ui.ResourceNavView(state)))
-	s.patchElements(sse, "summary", ui.RenderFragment(ui.SummaryView(state)))
-	s.patchElements(sse, "namespace picker", ui.RenderFragment(ui.NamespacePickerView(state)))
+	s.patchElements(sse, "summary slot", ui.RenderFragment(ui.SummarySlotView(state)))
+	s.patchElements(sse, "resource controls", ui.RenderFragment(ui.ResourceControlsView(state)))
 	s.patchElements(sse, "content", ui.RenderFragment(ui.ContentView(state)))
 }
 
@@ -102,7 +106,7 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 	state := s.state(signals)
 	sse := datastar.NewSSE(w, r)
 	s.patchSignals(sse, state.Signals)
-	s.patchElements(sse, "summary", ui.RenderFragment(ui.SummaryView(state)))
+	s.patchElements(sse, "summary slot", ui.RenderFragment(ui.SummarySlotView(state)))
 }
 
 func (s *Server) handleTable(w http.ResponseWriter, r *http.Request) {
@@ -110,8 +114,10 @@ func (s *Server) handleTable(w http.ResponseWriter, r *http.Request) {
 	state := s.state(signals)
 	sse := datastar.NewSSE(w, r)
 	s.patchSignals(sse, state.Signals)
+	s.patchElements(sse, "page title", ui.RenderFragment(ui.PageTitleView(state)))
 	s.patchElements(sse, "resource nav", ui.RenderFragment(ui.ResourceNavView(state)))
-	s.patchElements(sse, "namespace picker", ui.RenderFragment(ui.NamespacePickerView(state)))
+	s.patchElements(sse, "summary slot", ui.RenderFragment(ui.SummarySlotView(state)))
+	s.patchElements(sse, "resource controls", ui.RenderFragment(ui.ResourceControlsView(state)))
 	s.patchElements(sse, "content", ui.RenderFragment(ui.ContentView(state)))
 }
 
@@ -246,6 +252,8 @@ func (s *Server) state(signals ui.Signals) ui.PageState {
 		signals.SortColumn = ""
 		signals.SortOrder = ""
 	}
+	activeContexts := s.activeContexts(signals.Clusters)
+	signals.Clusters = strings.Join(s.selectedContexts(signals.Clusters), ",")
 
 	summary := kube.Summary{UpdatedAt: time.Now(), Error: "No Kubernetes client is configured."}
 	overview := kube.ClusterOverview{UpdatedAt: time.Now(), Error: "No Kubernetes client is configured."}
@@ -255,30 +263,31 @@ func (s *Server) state(signals ui.Signals) ui.PageState {
 	namespaceErr := ""
 
 	if session != nil && session.store != nil {
-		summary = session.store.Summary()
+		summary = s.summary(activeContexts)
 		overview = session.store.Overview()
 		if kind != kube.KindOverview {
-			table = session.store.TableWithSort(kind, namespace, signals.Query, signals.SortColumn, signals.SortOrder)
+			table = s.table(kind, namespace, signals.Query, signals.SortColumn, signals.SortOrder, activeContexts)
 			detail = session.store.Detail(kind, selectedNamespace, signals.SelectedName)
 		}
 		var err error
-		namespaces, err = session.store.Namespaces()
+		namespaces, err = s.namespaces(activeContexts)
 		if err != nil {
 			namespaceErr = err.Error()
 		}
 	}
 
 	return ui.PageState{
-		Cluster:      sessionCluster(session),
-		Clusters:     s.clusterList(),
-		Resources:    kube.ResourceDefs,
-		Signals:      ui.Signals{Context: contextName, Resource: string(kind), Namespace: namespace, Query: signals.Query, SortColumn: table.SortColumn, SortOrder: table.SortOrder, SelectedName: signals.SelectedName, SelectedNamespace: selectedNamespace, DetailMode: detailMode},
-		Summary:      summary,
-		Overview:     overview,
-		Table:        table,
-		Detail:       detail,
-		Namespaces:   namespaces,
-		NamespaceErr: namespaceErr,
+		Cluster:        sessionCluster(session),
+		Clusters:       s.clusterList(),
+		ActiveContexts: activeContexts,
+		Resources:      kube.ResourceDefs,
+		Signals:        ui.Signals{Context: contextName, Clusters: signals.Clusters, Resource: string(kind), Namespace: namespace, Query: signals.Query, SortColumn: table.SortColumn, SortOrder: table.SortOrder, SelectedName: signals.SelectedName, SelectedNamespace: selectedNamespace, DetailMode: detailMode},
+		Summary:        summary,
+		Overview:       overview,
+		Table:          table,
+		Detail:         detail,
+		Namespaces:     namespaces,
+		NamespaceErr:   namespaceErr,
 	}
 }
 
@@ -291,6 +300,9 @@ func readSignals(r *http.Request) ui.Signals {
 	q := r.URL.Query()
 	if contextName := q.Get("context"); contextName != "" {
 		signals.Context = contextName
+	}
+	if clusters := q.Get("clusters"); clusters != "" {
+		signals.Clusters = clusters
 	}
 	if resource := q.Get("resource"); resource != "" {
 		signals.Resource = resource
@@ -356,11 +368,16 @@ func (s *Server) ensureStore(contextName string) *clusterSession {
 	if session == nil {
 		return nil
 	}
-	if session.store == nil {
-		session.store = kube.NewResourceStore(session.cluster, s.logger)
-		session.store.Start(s.ctx)
-	}
+	s.ensureSessionStore(session)
 	return session
+}
+
+func (s *Server) ensureSessionStore(session *clusterSession) {
+	if session == nil || session.store != nil {
+		return
+	}
+	session.store = kube.NewResourceStore(session.cluster, s.logger)
+	session.store.Start(s.ctx)
 }
 
 func (s *Server) waitForInitialSync(session *clusterSession) {
@@ -380,6 +397,205 @@ func (s *Server) waitForInitialSync(session *clusterSession) {
 	ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
 	defer cancel()
 	store.WaitForSync(ctx)
+}
+
+func (s *Server) waitForInitialSyncs(sessions []*clusterSession) {
+	pending := make([]*clusterSession, 0, len(sessions))
+	s.mu.Lock()
+	for _, session := range sessions {
+		if session == nil || session.store == nil || session.initialSyncWaited {
+			continue
+		}
+		session.initialSyncWaited = true
+		pending = append(pending, session)
+	}
+	s.mu.Unlock()
+	if len(pending) == 0 {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(s.ctx, 5*time.Second)
+	defer cancel()
+	var wg sync.WaitGroup
+	for _, session := range pending {
+		wg.Add(1)
+		go func(store *kube.ResourceStore) {
+			defer wg.Done()
+			store.WaitForSync(ctx)
+		}(session.store)
+	}
+	wg.Wait()
+}
+
+func (s *Server) sessionsForContexts(contexts []string) []*clusterSession {
+	sessions := make([]*clusterSession, 0, len(contexts))
+	seen := map[string]bool{}
+	for _, contextName := range contexts {
+		if seen[contextName] {
+			continue
+		}
+		seen[contextName] = true
+		session := s.ensureStore(contextName)
+		if session != nil {
+			sessions = append(sessions, session)
+		}
+	}
+	return sessions
+}
+
+func (s *Server) activeContexts(value string) []string {
+	selected := s.selectedContexts(value)
+	if len(selected) > 0 {
+		return selected
+	}
+	contexts := s.allContexts()
+	if len(contexts) == 0 && s.defaultContext != "" {
+		contexts = append(contexts, s.defaultContext)
+	}
+	return contexts
+}
+
+func (s *Server) selectedContexts(value string) []string {
+	selected := map[string]bool{}
+	for _, contextName := range strings.Split(value, ",") {
+		contextName = strings.TrimSpace(contextName)
+		if contextName != "" {
+			selected[contextName] = true
+		}
+	}
+	if len(selected) == 0 {
+		return nil
+	}
+	contexts := make([]string, 0, len(selected))
+	for _, session := range s.clusters {
+		if session == nil || session.cluster == nil {
+			continue
+		}
+		if selected[session.cluster.ContextName] {
+			contexts = append(contexts, session.cluster.ContextName)
+		}
+	}
+	return contexts
+}
+
+func (s *Server) allContexts() []string {
+	contexts := make([]string, 0, len(s.clusters))
+	for _, session := range s.clusters {
+		if session != nil && session.cluster != nil {
+			contexts = append(contexts, session.cluster.ContextName)
+		}
+	}
+	return contexts
+}
+
+func (s *Server) summary(contexts []string) kube.Summary {
+	sessions := s.sessionsForContexts(contexts)
+	s.waitForInitialSyncs(sessions)
+	out := kube.Summary{UpdatedAt: time.Now()}
+	if len(sessions) == 0 {
+		out.Error = "No Kubernetes client is configured."
+		return out
+	}
+	if len(sessions) == 1 && sessions[0].store != nil {
+		return sessions[0].store.Summary()
+	}
+
+	errors := []string{}
+	for _, session := range sessions {
+		if session.store == nil {
+			continue
+		}
+		summary := session.store.Summary()
+		out.Nodes += summary.Nodes
+		out.Namespaces += summary.Namespaces
+		out.Pods += summary.Pods
+		out.Deployments += summary.Deployments
+		if summary.Error != "" {
+			errors = append(errors, session.cluster.ContextName+": "+summary.Error)
+		}
+	}
+	out.Context = fmt.Sprintf("%d clusters", len(sessions))
+	out.ServerVersion = out.Context
+	out.Error = strings.Join(errors, "\n")
+	return out
+}
+
+func (s *Server) table(kind kube.ResourceKind, namespace, query, sortColumn, sortOrder string, contexts []string) kube.Table {
+	sessions := s.sessionsForContexts(contexts)
+	s.waitForInitialSyncs(sessions)
+	def := resourceDef(kind)
+	out := kube.Table{
+		Kind:       def.Kind,
+		Label:      def.Label,
+		Namespace:  namespace,
+		Query:      query,
+		UpdatedAt:  time.Now(),
+		Namespaced: def.Scope == "namespaced",
+	}
+	if len(sessions) == 0 {
+		out.Error = "No Kubernetes client is configured."
+		return out
+	}
+	if len(sessions) == 1 && len(s.clusters) <= 1 && sessions[0].store != nil {
+		return sessions[0].store.TableWithSort(kind, namespace, query, sortColumn, sortOrder)
+	}
+
+	errors := []string{}
+	for _, session := range sessions {
+		if session.store == nil {
+			continue
+		}
+		table := session.store.TableWithSort(kind, namespace, "", "", "")
+		if len(out.Columns) == 0 && len(table.Columns) > 0 {
+			out.Columns = append([]string{"Cluster"}, table.Columns...)
+		}
+		if table.Error != "" {
+			errors = append(errors, session.cluster.ContextName+": "+table.Error)
+			continue
+		}
+		for _, row := range table.Rows {
+			row.Cluster = session.cluster.ContextName
+			row.Cells = append([]kube.Cell{{Value: session.cluster.ContextName, Class: "cluster"}}, row.Cells...)
+			out.Rows = append(out.Rows, row)
+		}
+	}
+	if len(out.Columns) == 0 {
+		out.Columns = append([]string{"Cluster"}, kube.Table{Kind: kind}.Columns...)
+	}
+	kube.FilterTableRows(&out, query)
+	kube.SortTableRows(&out, sortColumn, sortOrder)
+	out.Error = strings.Join(errors, "\n")
+	return out
+}
+
+func (s *Server) namespaces(contexts []string) ([]string, error) {
+	sessions := s.sessionsForContexts(contexts)
+	s.waitForInitialSyncs(sessions)
+	seen := map[string]bool{}
+	namespaces := []string{}
+	messages := []string{}
+	for _, session := range sessions {
+		if session.store == nil {
+			continue
+		}
+		names, err := session.store.Namespaces()
+		if err != nil {
+			messages = append(messages, session.cluster.ContextName+": "+err.Error())
+			continue
+		}
+		for _, namespace := range names {
+			if seen[namespace] {
+				continue
+			}
+			seen[namespace] = true
+			namespaces = append(namespaces, namespace)
+		}
+	}
+	sort.Strings(namespaces)
+	if len(messages) > 0 {
+		return namespaces, errors.New(strings.Join(messages, "\n"))
+	}
+	return namespaces, nil
 }
 
 func (s *Server) clusterList() []*kube.Cluster {

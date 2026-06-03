@@ -202,6 +202,7 @@ type Table struct {
 type Row struct {
 	Name      string
 	Namespace string
+	Cluster   string
 	Cells     []Cell
 	Status    string
 	StatusKey string
@@ -376,7 +377,7 @@ func (c *Cluster) TableWithSort(ctx context.Context, kind ResourceKind, namespac
 			}
 		}
 	case KindDeployments:
-		table.Columns = []string{"Name", "Namespace", "Ready", "Up-to-date", "Available", "CPU", "CPU Req", "CPU Limit", "MEM", "MEM Req", "MEM Limit", "Age"}
+		table.Columns = []string{"Name", "Namespace", "Replicas", "CPU", "CPU Req", "CPU Limit", "MEM", "MEM Req", "MEM Limit", "Age"}
 		list, err := c.Clientset.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			table.Error = err.Error()
@@ -389,7 +390,7 @@ func (c *Cluster) TableWithSort(ctx context.Context, kind ResourceKind, namespac
 			}
 		}
 	case KindStatefulSet:
-		table.Columns = []string{"Name", "Namespace", "Ready", "Replicas", "CPU", "CPU Req", "CPU Limit", "MEM", "MEM Req", "MEM Limit", "Age"}
+		table.Columns = []string{"Name", "Namespace", "Replicas", "CPU", "CPU Req", "CPU Limit", "MEM", "MEM Req", "MEM Limit", "Age"}
 		list, err := c.Clientset.AppsV1().StatefulSets(namespace).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			table.Error = err.Error()
@@ -402,7 +403,7 @@ func (c *Cluster) TableWithSort(ctx context.Context, kind ResourceKind, namespac
 			}
 		}
 	case KindDaemonSet:
-		table.Columns = []string{"Name", "Namespace", "Desired", "Ready", "Available", "CPU", "CPU Req", "CPU Limit", "MEM", "MEM Req", "MEM Limit", "Age"}
+		table.Columns = []string{"Name", "Namespace", "Replicas", "CPU", "CPU Req", "CPU Limit", "MEM", "MEM Req", "MEM Limit", "Age"}
 		list, err := c.Clientset.AppsV1().DaemonSets(namespace).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			table.Error = err.Error()
@@ -415,7 +416,7 @@ func (c *Cluster) TableWithSort(ctx context.Context, kind ResourceKind, namespac
 			}
 		}
 	case KindReplicaSets:
-		table.Columns = []string{"Name", "Namespace", "Desired", "Current", "Ready", "Age"}
+		table.Columns = []string{"Name", "Namespace", "Replicas", "Age"}
 		list, err := c.Clientset.AppsV1().ReplicaSets(namespace).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			table.Error = err.Error()
@@ -875,7 +876,7 @@ func deploymentRow(deployment appsv1.Deployment, usage corev1.ResourceList) Row 
 	if deployment.Spec.Replicas != nil {
 		desired = *deployment.Spec.Replicas
 	}
-	healthy := deployment.Status.ReadyReplicas == desired && deployment.Status.UpdatedReplicas == desired
+	healthy := deployment.Status.ReadyReplicas == desired && deployment.Status.UpdatedReplicas == desired && deployment.Status.AvailableReplicas == desired
 	return Row{
 		Name:      deployment.Name,
 		Namespace: deployment.Namespace,
@@ -884,9 +885,7 @@ func deploymentRow(deployment appsv1.Deployment, usage corev1.ResourceList) Row 
 		Cells: []Cell{
 			{Value: deployment.Name, Class: "primary"},
 			{Value: deployment.Namespace},
-			cellWithClassAndOptionalSort(fmt.Sprintf("%d/%d", deployment.Status.ReadyReplicas, desired), "status "+healthKey(healthy), ratioSortValue(int64(deployment.Status.ReadyReplicas), int64(desired))),
-			cellWithSortValue(fmt.Sprint(deployment.Status.UpdatedReplicas), int64(deployment.Status.UpdatedReplicas)),
-			cellWithSortValue(fmt.Sprint(deployment.Status.AvailableReplicas), int64(deployment.Status.AvailableReplicas)),
+			replicaSummaryCell(deployment.Status.ReadyReplicas, desired, healthKey(healthy), replicaDetail(deployment.Status.UpdatedReplicas, "upd"), replicaDetail(deployment.Status.AvailableReplicas, "avail")),
 			resourceListCell(usage, corev1.ResourceCPU),
 			containerResourceCell(deployment.Spec.Template.Spec.Containers, resourceRequests, corev1.ResourceCPU),
 			containerResourceCell(deployment.Spec.Template.Spec.Containers, resourceLimits, corev1.ResourceCPU),
@@ -913,8 +912,7 @@ func statefulSetRow(statefulSet appsv1.StatefulSet, usage corev1.ResourceList) R
 		Cells: []Cell{
 			{Value: statefulSet.Name, Class: "primary"},
 			{Value: statefulSet.Namespace},
-			cellWithClassAndOptionalSort(fmt.Sprintf("%d/%d", statefulSet.Status.ReadyReplicas, *desired), "status "+healthKey(healthy), ratioSortValue(int64(statefulSet.Status.ReadyReplicas), int64(*desired))),
-			cellWithSortValue(fmt.Sprint(statefulSet.Status.Replicas), int64(statefulSet.Status.Replicas)),
+			replicaSummaryCell(statefulSet.Status.ReadyReplicas, *desired, healthKey(healthy), replicaDetail(statefulSet.Status.Replicas, "cur")),
 			resourceListCell(usage, corev1.ResourceCPU),
 			containerResourceCell(statefulSet.Spec.Template.Spec.Containers, resourceRequests, corev1.ResourceCPU),
 			containerResourceCell(statefulSet.Spec.Template.Spec.Containers, resourceLimits, corev1.ResourceCPU),
@@ -927,7 +925,7 @@ func statefulSetRow(statefulSet appsv1.StatefulSet, usage corev1.ResourceList) R
 }
 
 func daemonSetRow(daemonSet appsv1.DaemonSet, usage corev1.ResourceList) Row {
-	healthy := daemonSet.Status.NumberReady == daemonSet.Status.DesiredNumberScheduled
+	healthy := daemonSet.Status.NumberReady == daemonSet.Status.DesiredNumberScheduled && daemonSet.Status.NumberAvailable == daemonSet.Status.DesiredNumberScheduled
 	return Row{
 		Name:      daemonSet.Name,
 		Namespace: daemonSet.Namespace,
@@ -936,9 +934,7 @@ func daemonSetRow(daemonSet appsv1.DaemonSet, usage corev1.ResourceList) Row {
 		Cells: []Cell{
 			{Value: daemonSet.Name, Class: "primary"},
 			{Value: daemonSet.Namespace},
-			cellWithSortValue(fmt.Sprint(daemonSet.Status.DesiredNumberScheduled), int64(daemonSet.Status.DesiredNumberScheduled)),
-			cellWithClassAndSortValue(fmt.Sprint(daemonSet.Status.NumberReady), "status "+healthKey(healthy), int64(daemonSet.Status.NumberReady)),
-			cellWithSortValue(fmt.Sprint(daemonSet.Status.NumberAvailable), int64(daemonSet.Status.NumberAvailable)),
+			replicaSummaryCell(daemonSet.Status.NumberReady, daemonSet.Status.DesiredNumberScheduled, healthKey(healthy), replicaDetail(daemonSet.Status.NumberAvailable, "avail")),
 			resourceListCell(usage, corev1.ResourceCPU),
 			containerResourceCell(daemonSet.Spec.Template.Spec.Containers, resourceRequests, corev1.ResourceCPU),
 			containerResourceCell(daemonSet.Spec.Template.Spec.Containers, resourceLimits, corev1.ResourceCPU),
@@ -1039,9 +1035,7 @@ func replicaSetRow(replicaSet appsv1.ReplicaSet) Row {
 		Cells: []Cell{
 			{Value: replicaSet.Name, Class: "primary"},
 			{Value: replicaSet.Namespace},
-			cellWithSortValue(fmt.Sprint(desired), int64(desired)),
-			cellWithSortValue(fmt.Sprint(replicaSet.Status.Replicas), int64(replicaSet.Status.Replicas)),
-			cellWithClassAndSortValue(fmt.Sprint(replicaSet.Status.ReadyReplicas), "status "+healthKey(healthy), int64(replicaSet.Status.ReadyReplicas)),
+			replicaSummaryCell(replicaSet.Status.ReadyReplicas, desired, healthKey(healthy), replicaDetail(replicaSet.Status.Replicas, "cur")),
 			ageCell(replicaSet.CreationTimestamp.Time),
 		},
 	}
@@ -1443,6 +1437,24 @@ func matches(row Row, query string) bool {
 	return false
 }
 
+func FilterTableRows(table *Table, query string) {
+	table.Query = query
+	if strings.TrimSpace(query) == "" {
+		return
+	}
+	rows := table.Rows[:0]
+	for _, row := range table.Rows {
+		if matches(row, query) {
+			rows = append(rows, row)
+		}
+	}
+	table.Rows = rows
+}
+
+func SortTableRows(table *Table, sortColumn, sortOrder string) {
+	sortTableRows(table, sortColumn, sortOrder)
+}
+
 func sortTableRows(table *Table, sortColumn, sortOrder string) {
 	sortColumn, sortOrder = normalizeSort(table.Columns, sortColumn, sortOrder)
 	table.SortColumn = sortColumn
@@ -1498,10 +1510,21 @@ func compareDefaultRows(left, right Row, namespaced bool) int {
 }
 
 func rowSortKey(row Row, namespaced bool) []string {
-	if namespaced && len(row.Cells) > 1 {
-		return []string{row.Cells[1].Value, row.Name}
+	key := []string{}
+	if row.Cluster != "" {
+		key = append(key, row.Cluster)
 	}
-	return []string{row.Name}
+	if namespaced && len(row.Cells) > 1 {
+		namespaceIndex := 1
+		if row.Cluster != "" {
+			namespaceIndex = 2
+		}
+		if len(row.Cells) > namespaceIndex {
+			key = append(key, row.Cells[namespaceIndex].Value)
+		}
+	}
+	key = append(key, row.Name)
+	return key
 }
 
 func rowCellValue(row Row, columnIndex int) string {
@@ -1567,6 +1590,25 @@ func cellWithOptionalSort(value string, sortValue *int64) Cell {
 
 func cellWithClassAndOptionalSort(value, class string, sortValue *int64) Cell {
 	return Cell{Value: value, Class: class, SortValue: sortValue}
+}
+
+type replicaSummaryDetail struct {
+	value int32
+	label string
+}
+
+func replicaDetail(value int32, label string) replicaSummaryDetail {
+	return replicaSummaryDetail{value: value, label: label}
+}
+
+func replicaSummaryCell(ready, desired int32, statusKey string, details ...replicaSummaryDetail) Cell {
+	parts := []string{fmt.Sprintf("%d/%d ready", ready, desired)}
+	for _, detail := range details {
+		if detail.value != desired {
+			parts = append(parts, fmt.Sprintf("%s %d", detail.label, detail.value))
+		}
+	}
+	return cellWithClassAndOptionalSort(strings.Join(parts, " · "), "status "+statusKey, ratioSortValue(int64(ready), int64(desired)))
 }
 
 func ptrInt64(value int64) *int64 {
