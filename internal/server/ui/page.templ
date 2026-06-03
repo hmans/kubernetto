@@ -56,7 +56,7 @@ templ SummarySlotView(state PageState) {
 
 templ ResourceControlsView(state PageState) {
 	<div id="resource-controls">
-		if !isOverview(state) {
+		if !isStandalonePage(state) {
 			<section class="grid gap-2.5 rounded-lg border border-[var(--line)] bg-[var(--panel)] p-3 shadow-[var(--shadow)]" aria-label="Table search">
 				<div class="grid min-w-0 gap-[5px]">
 					<label class="text-xs text-[var(--muted)]" for="query">Search</label>
@@ -82,6 +82,8 @@ templ ContentView(state PageState) {
 		</div>
 		if isOverview(state) {
 			@OverviewView(state)
+		} else if isActionItems(state) {
+			@ActionItemsView(state)
 		} else {
 			@TableView(state)
 			if hasDetail(state) {

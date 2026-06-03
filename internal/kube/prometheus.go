@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"sort"
 	"strconv"
@@ -15,8 +16,12 @@ import (
 )
 
 const (
-	usageMetricsWindow = 60 * time.Minute
-	prometheusStep     = 60 * time.Second
+	usageMetricsWindow          = 60 * time.Minute
+	prometheusStep              = 60 * time.Second
+	prometheusMaxQueryLength    = 4096
+	prometheusMaxResponseBytes  = 4 * 1024 * 1024
+	prometheusCPUUsageMetric    = "container_cpu_usage_seconds_total"
+	prometheusMemoryUsageMetric = "container_memory_working_set_bytes"
 )
 
 type prometheusTarget struct {
@@ -125,6 +130,22 @@ func (s *ResourceStore) PrometheusRangeData(ctx context.Context, queries []Prome
 		return out, lastErr
 	}
 	return out, errors.New("Prometheus range queries returned no usable target")
+}
+
+func ValidatePrometheusRangeQueries(queries []PrometheusRangeQuery) error {
+	for _, query := range queries {
+		value := strings.TrimSpace(query.Query)
+		if value == "" {
+			return errors.New("PromQL query cannot be empty")
+		}
+		if len(value) > prometheusMaxQueryLength {
+			return fmt.Errorf("PromQL query %q is too long", query.Name)
+		}
+		if !isAllowedPodUsageQuery(value) {
+			return fmt.Errorf("PromQL query %q is not an allowed pod usage query", query.Name)
+		}
+	}
+	return nil
 }
 
 func (s *ResourceStore) loadPrometheusTimelines(ctx context.Context, cpuQuery, memoryQuery string) (map[string][]UsageSample, prometheusTarget, error) {
@@ -275,6 +296,80 @@ func podMemoryQueryFor(namespace, pod string) string {
 	return `sum by (namespace, pod) (container_memory_working_set_bytes{namespace=` + strconv.Quote(namespace) + `,pod=` + strconv.Quote(pod) + `,container!="",image!=""})`
 }
 
+func isAllowedPodUsageQuery(query string) bool {
+	if query == podCPUQuery || query == podMemoryQuery {
+		return true
+	}
+	if isAllowedPodBatchQuery(query, prometheusCPUUsageMetric, true) {
+		return true
+	}
+	return isAllowedPodBatchQuery(query, prometheusMemoryUsageMetric, false)
+}
+
+func isAllowedPodBatchQuery(query, metric string, rate bool) bool {
+	const prefix = "sum by (namespace, pod) ("
+	if !strings.HasPrefix(query, prefix) || !strings.HasSuffix(query, ")") {
+		return false
+	}
+	inner := strings.TrimSuffix(strings.TrimPrefix(query, prefix), ")")
+	parts := strings.Split(inner, " or ")
+	for _, part := range parts {
+		if !isAllowedPodSelector(part, metric, rate) {
+			return false
+		}
+	}
+	return len(parts) > 0
+}
+
+func isAllowedPodSelector(part, metric string, rate bool) bool {
+	if rate {
+		if !strings.HasPrefix(part, "rate(") || !strings.HasSuffix(part, "[5m])") {
+			return false
+		}
+		part = strings.TrimSuffix(strings.TrimPrefix(part, "rate("), "[5m])")
+	}
+	prefix := metric + "{"
+	if !strings.HasPrefix(part, prefix) || !strings.HasSuffix(part, "}") {
+		return false
+	}
+	selector := strings.TrimSuffix(strings.TrimPrefix(part, prefix), "}")
+	if selector == `pod!="",container!="",image!=""` {
+		return true
+	}
+	if !strings.HasPrefix(selector, `namespace="`) {
+		return false
+	}
+	rest, ok := consumeQuotedSelector(selector[len(`namespace="`):])
+	if !ok || !strings.HasPrefix(rest, `,pod`) {
+		return false
+	}
+	rest = rest[len(`,pod`):]
+	if strings.HasPrefix(rest, `="`) {
+		rest = rest[len(`="`):]
+	} else if strings.HasPrefix(rest, `=~"`) {
+		rest = rest[len(`=~"`):]
+	} else {
+		return false
+	}
+	rest, ok = consumeQuotedSelector(rest)
+	return ok && rest == `,container!="",image!=""`
+}
+
+func consumeQuotedSelector(value string) (string, bool) {
+	escaped := false
+	for index, r := range value {
+		switch {
+		case escaped:
+			escaped = false
+		case r == '\\':
+			escaped = true
+		case r == '"':
+			return value[index+1:], true
+		}
+	}
+	return "", false
+}
+
 func prometheusRangeSeries(name string, series []prometheusSeries) []PrometheusRangeSeries {
 	out := make([]PrometheusRangeSeries, 0, len(series))
 	for _, item := range series {
@@ -393,7 +488,7 @@ func prometheusScore(service corev1.Service, port corev1.ServicePort) int {
 }
 
 func (s *ResourceStore) queryPrometheusRange(ctx context.Context, target prometheusTarget, query string, start, end time.Time, step time.Duration) ([]prometheusSeries, error) {
-	raw, err := s.cluster.Clientset.CoreV1().RESTClient().
+	body, err := s.cluster.Clientset.CoreV1().RESTClient().
 		Get().
 		Namespace(target.Namespace).
 		Resource("services").
@@ -404,10 +499,15 @@ func (s *ResourceStore) queryPrometheusRange(ctx context.Context, target prometh
 		Param("start", strconv.FormatInt(start.Unix(), 10)).
 		Param("end", strconv.FormatInt(end.Unix(), 10)).
 		Param("step", strconv.Itoa(int(step.Seconds()))+"s").
-		Do(ctx).
-		Raw()
+		Stream(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("query %s/%s: %w", target.Namespace, target.Service, err)
+	}
+	defer body.Close()
+
+	raw, err := readLimitedPrometheusResponse(body)
+	if err != nil {
+		return nil, fmt.Errorf("read Prometheus response from %s/%s: %w", target.Namespace, target.Service, err)
 	}
 
 	var response prometheusRangeResponse
@@ -421,6 +521,17 @@ func (s *ResourceStore) queryPrometheusRange(ctx context.Context, target prometh
 		return nil, errors.New("Prometheus query failed")
 	}
 	return response.Data.Result, nil
+}
+
+func readLimitedPrometheusResponse(r io.Reader) ([]byte, error) {
+	raw, err := io.ReadAll(io.LimitReader(r, prometheusMaxResponseBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > prometheusMaxResponseBytes {
+		return nil, fmt.Errorf("response exceeds %d bytes", prometheusMaxResponseBytes)
+	}
+	return raw, nil
 }
 
 func (t prometheusTarget) proxyName() string {

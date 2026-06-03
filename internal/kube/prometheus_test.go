@@ -2,6 +2,7 @@ package kube
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -97,6 +98,49 @@ func TestPrometheusSampleParsesFractionalTimestamp(t *testing.T) {
 	}
 	if sample.Value != 1.25 {
 		t.Fatalf("value = %f", sample.Value)
+	}
+}
+
+func TestValidatePrometheusRangeQueriesAllowsPodUsageQueries(t *testing.T) {
+	queries := []PrometheusRangeQuery{
+		{Name: "overview-cpu", Query: PodCPUQuery()},
+		{Name: "overview-memory", Query: PodMemoryQuery()},
+		{Name: "pod-cpu", Query: PodCPUQueryFor("prod", "api")},
+		{Name: "pod-memory", Query: PodMemoryQueryFor("prod", "api")},
+		{Name: "batch-cpu", Query: `sum by (namespace, pod) (rate(container_cpu_usage_seconds_total{namespace="prod",pod=~"api|worker",container!="",image!=""}[5m]))`},
+		{Name: "batch-memory", Query: `sum by (namespace, pod) (container_memory_working_set_bytes{namespace="prod",pod=~"api|worker",container!="",image!=""})`},
+	}
+
+	if err := ValidatePrometheusRangeQueries(queries); err != nil {
+		t.Fatalf("validate queries: %v", err)
+	}
+}
+
+func TestValidatePrometheusRangeQueriesRejectsGenericPromQL(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+	}{
+		{name: "generic up", query: "up"},
+		{name: "empty", query: " "},
+		{name: "oversized", query: strings.Repeat("a", prometheusMaxQueryLength+1)},
+		{name: "wrong metric", query: `sum by (namespace, pod) (rate(process_cpu_seconds_total{namespace="prod",pod=~"api",container!="",image!=""}[5m]))`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidatePrometheusRangeQueries([]PrometheusRangeQuery{{Name: tt.name, Query: tt.query}})
+			if err == nil {
+				t.Fatalf("expected validation error for %q", tt.query)
+			}
+		})
+	}
+}
+
+func TestReadLimitedPrometheusResponseRejectsOversizedBody(t *testing.T) {
+	_, err := readLimitedPrometheusResponse(strings.NewReader(strings.Repeat("a", prometheusMaxResponseBytes+1)))
+	if err == nil {
+		t.Fatalf("expected oversized response error")
 	}
 }
 

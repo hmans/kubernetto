@@ -2,37 +2,16 @@
 go = "latest"
 node = "latest"
 pnpm = "latest"
-watchexec = "latest"
 
 [tasks.dev]
-description = "Run Kubernetto and restart when source files change"
-run = "./scripts/dev-watch"
+description = "Run Kubernetto"
+raw_args = true
+run = "exec go run ./cmd/kubernetto"
 
 [tasks.build]
 description = "Build Kubernetto"
-sources = [
-	"**/*.go",
-	"**/*.templ",
-	"frontend/**/*",
-	"package.json",
-	"pnpm-lock.yaml",
-	"vite.config.mjs",
-	"go.mod",
-	"go.sum",
-	"mise.toml",
-	"!**/*_templ.go",
-]
-outputs = [
-	"kubernetto",
-	"internal/server/ui/*_templ.go",
-]
 run = """
 pnpm build:assets
 go generate ./...
 go build -o ./kubernetto ./cmd/kubernetto
 """
-
-[tasks.app]
-hide = true
-depends = "build"
-run = "exec ./kubernetto"

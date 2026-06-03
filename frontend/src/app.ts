@@ -240,6 +240,22 @@ function focusSearchInput() {
   query.focus();
 }
 
+function actionItemUrlPatch(actionItem: HTMLElement): UrlStatePatch {
+  const context = actionItem.dataset.actionContext || "";
+  return {
+    context,
+    clusters: context,
+    resource: actionItem.dataset.actionKind || defaultUrlState.resource,
+    namespace: "",
+    query: actionItem.dataset.actionQuery || "",
+    sortColumn: "",
+    sortOrder: "",
+    selectedName: actionItem.dataset.actionSelectedName || "",
+    selectedNamespace: actionItem.dataset.actionSelectedNamespace || "",
+    detailMode: "overview",
+  };
+}
+
 function applyOptimisticResourceNav(resourceButton: HTMLElement) {
   const nav = resourceButton.closest("#resource-nav");
   const group = resourceButton.closest("[data-resource-group]");
@@ -294,6 +310,12 @@ document.addEventListener("click", (event) => {
   if (!target) {
     return;
   }
+  const actionButton = target.closest<HTMLElement>("[data-action-context]");
+  if (actionButton) {
+    syncUrlState(actionItemUrlPatch(actionButton), { mode: "push" });
+    return;
+  }
+
   const fleetButton = target.closest<HTMLElement>("[data-fleet-context]");
   if (fleetButton) {
     const context = fleetButton.dataset.fleetContext || "";
@@ -409,6 +431,12 @@ document.addEventListener("keydown", (event) => {
   if (event.key !== "Enter") {
     return;
   }
+  const actionButton = target?.closest<HTMLElement>("[data-action-context]");
+  if (actionButton) {
+    syncUrlState(actionItemUrlPatch(actionButton), { mode: "push" });
+    return;
+  }
+
   const row = target?.closest<HTMLElement>("tr[data-row-name]");
   if (!row) {
     return;

@@ -1,0 +1,90 @@
+package ui
+
+import "fmt"
+
+templ ActionItemsView(state PageState) {
+	<section class="grid min-w-0 gap-3.5" aria-label="Issues">
+		<div class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--line)] bg-[var(--panel)] px-4 py-3.5 shadow-[var(--shadow)]">
+			<div>
+				<h2 class="m-0 text-base leading-[1.2] text-[var(--text-strong)]">Issues</h2>
+				<div class="updated">{ fmt.Sprintf("%d current issues · updated %s", len(state.Actions.Items), formatClock(state.Actions.UpdatedAt)) }</div>
+			</div>
+			<div class="flex flex-wrap items-center justify-end gap-3">
+				@ClusterFilterView(state)
+			</div>
+		</div>
+		if state.Actions.Error != "" {
+			<div class="notice danger">{ state.Actions.Error }</div>
+		} else if len(state.Actions.Items) == 0 {
+			<div class="action-empty">
+				<strong>No current issues</strong>
+				<span>Active clusters have no recent warning events or degraded readiness metrics.</span>
+			</div>
+		} else {
+			<section class="action-list-panel" aria-label="Current issues">
+				<div class="action-list">
+					for _, item := range state.Actions.Items {
+						<article class={ actionItemClass(item) } { actionItemAttrs(item)... }>
+							<div class="action-item-main">
+								<div class="action-item-head">
+									<span class={ "status-pill " + item.StatusKey }>{ item.StatusKey }</span>
+									<div class="min-w-0">
+										<h3>{ item.Title }</h3>
+										if item.Detail != "" {
+											<div class="action-item-detail">{ item.Detail }</div>
+										}
+									</div>
+								</div>
+								if item.Message != "" {
+									<p>{ item.Message }</p>
+								}
+								<div class="action-item-meta">
+									<span class="action-meta-pill">
+										<span class="action-meta-icon icon-[lucide--server]" aria-hidden="true"></span>
+										<span>{ item.Context }</span>
+									</span>
+									if item.Namespace != "" {
+										<span class="action-meta-pill">
+											<span class="action-meta-icon icon-[lucide--folder]" aria-hidden="true"></span>
+											<span>{ item.Namespace }</span>
+										</span>
+									}
+									if item.Object != "" {
+										<span class="action-meta-pill">
+											<span class="action-meta-icon icon-[lucide--box]" aria-hidden="true"></span>
+											<span>{ item.Object }</span>
+										</span>
+									}
+									if item.Reason != "" {
+										<span class="action-meta-pill">
+											<span class="action-meta-icon icon-[lucide--tag]" aria-hidden="true"></span>
+											<span>{ item.Reason }</span>
+										</span>
+									}
+									if item.Age != "" {
+										<span class="action-meta-pill">
+											<span class="action-meta-icon icon-[lucide--clock]" aria-hidden="true"></span>
+											<span>{ item.Age }</span>
+										</span>
+									}
+									if item.Count > 1 {
+										<span class="action-meta-pill">
+											<span class="action-meta-icon icon-[lucide--repeat]" aria-hidden="true"></span>
+											<span>{ fmt.Sprintf("%d times", item.Count) }</span>
+										</span>
+									}
+								</div>
+							</div>
+							<div class="action-item-aside">
+								<span class="action-item-button">
+									<span class="icon-[lucide--search]" aria-hidden="true"></span>
+									<span>{ item.ActionLabel }</span>
+								</span>
+							</div>
+						</article>
+					}
+				</div>
+			</section>
+		}
+	</section>
+}

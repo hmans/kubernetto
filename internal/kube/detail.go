@@ -322,7 +322,7 @@ func podDetail(pod corev1.Pod) ResourceDetail {
 	detail.Sections = append(detail.Sections,
 		DetailSection{Title: "Containers", Fields: containerFields(pod)},
 		DetailSection{Title: "Conditions", Fields: podConditionFields(pod.Status.Conditions)},
-		ownerSection(pod.OwnerReferences),
+		ownerSection(pod.Namespace, pod.OwnerReferences),
 	)
 	return compactDetail(detail)
 }
@@ -376,7 +376,7 @@ func statefulSetDetail(statefulSet appsv1.StatefulSet) ResourceDetail {
 	)
 	detail.Sections = append(detail.Sections,
 		DetailSection{Title: "Selector", Fields: selectorFields(statefulSet.Spec.Selector)},
-		ownerSection(statefulSet.OwnerReferences),
+		ownerSection(statefulSet.Namespace, statefulSet.OwnerReferences),
 	)
 	return compactDetail(detail)
 }
@@ -489,7 +489,7 @@ func namespaceDetail(namespace corev1.Namespace) ResourceDetail {
 	detail := detailBase(KindNamespaces, "Namespaces", namespace.ObjectMeta, string(namespace.Status.Phase), healthKey(healthy))
 	detail.YAML = resourceYAML(yamlNamespace)
 	detail.Fields = detailFields("Phase", string(namespace.Status.Phase))
-	detail.Sections = append(detail.Sections, ownerSection(namespace.OwnerReferences))
+	detail.Sections = append(detail.Sections, ownerSection(namespace.Namespace, namespace.OwnerReferences))
 	return compactDetail(detail)
 }
 
@@ -501,7 +501,7 @@ func replicaSetDetail(replicaSet appsv1.ReplicaSet) ResourceDetail {
 	detail := detailBase(KindReplicaSets, "ReplicaSets", replicaSet.ObjectMeta, row.Status, row.StatusKey)
 	detail.YAML = resourceYAML(yamlReplicaSet)
 	detail.Fields = detailFields("Namespace", replicaSet.Namespace, "Desired", fmt.Sprint(valueOrZero(replicaSet.Spec.Replicas)), "Current", fmt.Sprint(replicaSet.Status.Replicas), "Ready", fmt.Sprint(replicaSet.Status.ReadyReplicas), "Available", fmt.Sprint(replicaSet.Status.AvailableReplicas))
-	detail.Sections = append(detail.Sections, DetailSection{Title: "Selector", Fields: selectorFields(replicaSet.Spec.Selector)}, ownerSection(replicaSet.OwnerReferences))
+	detail.Sections = append(detail.Sections, DetailSection{Title: "Selector", Fields: selectorFields(replicaSet.Spec.Selector)}, ownerSection(replicaSet.Namespace, replicaSet.OwnerReferences))
 	return compactDetail(detail)
 }
 
@@ -513,7 +513,7 @@ func jobDetail(job batchv1.Job) ResourceDetail {
 	detail := detailBase(KindJobs, "Jobs", job.ObjectMeta, row.Status, row.StatusKey)
 	detail.YAML = resourceYAML(yamlJob)
 	detail.Fields = detailFields("Namespace", job.Namespace, "Succeeded", fmt.Sprint(job.Status.Succeeded), "Failed", fmt.Sprint(job.Status.Failed), "Active", fmt.Sprint(job.Status.Active), "Parallelism", fmt.Sprint(valueOrZero(job.Spec.Parallelism)), "Completions", fmt.Sprint(valueOrZero(job.Spec.Completions)))
-	detail.Sections = append(detail.Sections, DetailSection{Title: "Selector", Fields: selectorFields(job.Spec.Selector)}, ownerSection(job.OwnerReferences))
+	detail.Sections = append(detail.Sections, DetailSection{Title: "Selector", Fields: selectorFields(job.Spec.Selector)}, ownerSection(job.Namespace, job.OwnerReferences))
 	return compactDetail(detail)
 }
 
@@ -529,7 +529,7 @@ func cronJobDetail(cronJob batchv1.CronJob) ResourceDetail {
 	detail := detailBase(KindCronJobs, "CronJobs", cronJob.ObjectMeta, row.Status, row.StatusKey)
 	detail.YAML = resourceYAML(yamlCronJob)
 	detail.Fields = detailFields("Namespace", cronJob.Namespace, "Schedule", cronJob.Spec.Schedule, "Suspend", fmt.Sprint(cronJob.Spec.Suspend != nil && *cronJob.Spec.Suspend), "Active Jobs", fmt.Sprint(len(cronJob.Status.Active)), "Last Schedule", lastSchedule)
-	detail.Sections = append(detail.Sections, ownerSection(cronJob.OwnerReferences))
+	detail.Sections = append(detail.Sections, ownerSection(cronJob.Namespace, cronJob.OwnerReferences))
 	return compactDetail(detail)
 }
 
@@ -545,7 +545,7 @@ func persistentVolumeClaimDetail(pvc corev1.PersistentVolumeClaim) ResourceDetai
 	detail := detailBase(KindPersistentVolumeClaims, "PersistentVolumeClaims", pvc.ObjectMeta, row.Status, row.StatusKey)
 	detail.YAML = resourceYAML(yamlPVC)
 	detail.Fields = detailFields("Namespace", pvc.Namespace, "Phase", string(pvc.Status.Phase), "Volume", pvc.Spec.VolumeName, "StorageClass", className, "Access Modes", accessModes(pvc.Spec.AccessModes))
-	detail.Sections = append(detail.Sections, DetailSection{Title: "Capacity", Fields: resourceListFields(pvc.Status.Capacity)}, DetailSection{Title: "Requested", Fields: resourceListFields(pvc.Spec.Resources.Requests)}, ownerSection(pvc.OwnerReferences))
+	detail.Sections = append(detail.Sections, DetailSection{Title: "Capacity", Fields: resourceListFields(pvc.Status.Capacity)}, DetailSection{Title: "Requested", Fields: resourceListFields(pvc.Spec.Resources.Requests)}, ownerSection(pvc.Namespace, pvc.OwnerReferences))
 	return compactDetail(detail)
 }
 
@@ -561,7 +561,7 @@ func persistentVolumeDetail(pv corev1.PersistentVolume) ResourceDetail {
 	detail := detailBase(KindPersistentVolumes, "PersistentVolumes", pv.ObjectMeta, row.Status, row.StatusKey)
 	detail.YAML = resourceYAML(yamlPV)
 	detail.Fields = detailFields("Phase", string(pv.Status.Phase), "StorageClass", pv.Spec.StorageClassName, "Access Modes", accessModes(pv.Spec.AccessModes), "Reclaim Policy", string(pv.Spec.PersistentVolumeReclaimPolicy), "Claim", claim)
-	detail.Sections = append(detail.Sections, DetailSection{Title: "Capacity", Fields: resourceListFields(pv.Spec.Capacity)}, ownerSection(pv.OwnerReferences))
+	detail.Sections = append(detail.Sections, DetailSection{Title: "Capacity", Fields: resourceListFields(pv.Spec.Capacity)}, ownerSection(pv.Namespace, pv.OwnerReferences))
 	return compactDetail(detail)
 }
 
@@ -585,7 +585,7 @@ func endpointsDetail(endpoint corev1.Endpoints) ResourceDetail {
 	detail := detailBase(KindEndpoints, "Endpoints", endpoint.ObjectMeta, row.Status, row.StatusKey)
 	detail.YAML = resourceYAML(yamlEndpoint)
 	detail.Fields = detailFields("Namespace", endpoint.Namespace, "Addresses", row.Cells[2].Value, "Not Ready", row.Cells[3].Value, "Ports", row.Cells[4].Value)
-	detail.Sections = append(detail.Sections, ownerSection(endpoint.OwnerReferences))
+	detail.Sections = append(detail.Sections, ownerSection(endpoint.Namespace, endpoint.OwnerReferences))
 	return compactDetail(detail)
 }
 
@@ -597,7 +597,7 @@ func endpointSliceDetail(endpointSlice discoveryv1.EndpointSlice) ResourceDetail
 	detail := detailBase(KindEndpointSlices, "EndpointSlices", endpointSlice.ObjectMeta, row.Status, row.StatusKey)
 	detail.YAML = resourceYAML(yamlEndpointSlice)
 	detail.Fields = detailFields("Namespace", endpointSlice.Namespace, "Address Type", string(endpointSlice.AddressType), "Endpoints", fmt.Sprint(len(endpointSlice.Endpoints)), "Ports", row.Cells[4].Value)
-	detail.Sections = append(detail.Sections, ownerSection(endpointSlice.OwnerReferences))
+	detail.Sections = append(detail.Sections, ownerSection(endpointSlice.Namespace, endpointSlice.OwnerReferences))
 	return compactDetail(detail)
 }
 
@@ -620,7 +620,7 @@ func networkPolicyDetail(policy networkingv1.NetworkPolicy) ResourceDetail {
 	detail := detailBase(KindNetworkPolicies, "NetworkPolicies", policy.ObjectMeta, row.Status, row.StatusKey)
 	detail.YAML = resourceYAML(yamlPolicy)
 	detail.Fields = detailFields("Namespace", policy.Namespace, "Pod Selector", labelSelectorString(&policy.Spec.PodSelector), "Policy Types", networkPolicyTypes(policy.Spec.PolicyTypes), "Ingress Rules", fmt.Sprint(len(policy.Spec.Ingress)), "Egress Rules", fmt.Sprint(len(policy.Spec.Egress)))
-	detail.Sections = append(detail.Sections, ownerSection(policy.OwnerReferences))
+	detail.Sections = append(detail.Sections, ownerSection(policy.Namespace, policy.OwnerReferences))
 	return compactDetail(detail)
 }
 
@@ -632,7 +632,7 @@ func serviceAccountDetail(account corev1.ServiceAccount) ResourceDetail {
 	detail := detailBase(KindServiceAccounts, "ServiceAccounts", account.ObjectMeta, row.Status, row.StatusKey)
 	detail.YAML = resourceYAML(yamlAccount)
 	detail.Fields = detailFields("Namespace", account.Namespace, "Secrets", fmt.Sprint(len(account.Secrets)), "Image Pull Secrets", fmt.Sprint(len(account.ImagePullSecrets)), "Automount Token", boolPtrValue(account.AutomountServiceAccountToken))
-	detail.Sections = append(detail.Sections, ownerSection(account.OwnerReferences))
+	detail.Sections = append(detail.Sections, ownerSection(account.Namespace, account.OwnerReferences))
 	return compactDetail(detail)
 }
 
@@ -688,7 +688,7 @@ func configMapDetail(configMap corev1.ConfigMap) ResourceDetail {
 	detail := detailBase(KindConfigMaps, "ConfigMaps", configMap.ObjectMeta, row.Status, row.StatusKey)
 	detail.YAML = resourceYAML(yamlConfigMap)
 	detail.Fields = detailFields("Namespace", configMap.Namespace, "Data", fmt.Sprint(len(configMap.Data)), "Binary Data", fmt.Sprint(len(configMap.BinaryData)))
-	detail.Sections = append(detail.Sections, ownerSection(configMap.OwnerReferences))
+	detail.Sections = append(detail.Sections, ownerSection(configMap.Namespace, configMap.OwnerReferences))
 	return compactDetail(detail)
 }
 
@@ -702,7 +702,7 @@ func secretDetail(secret corev1.Secret) ResourceDetail {
 	detail := detailBase(KindSecrets, "Secrets", secret.ObjectMeta, row.Status, row.StatusKey)
 	detail.YAML = resourceYAML(yamlSecret)
 	detail.Fields = detailFields("Namespace", secret.Namespace, "Type", string(secret.Type), "Data Keys", fmt.Sprint(len(secret.Data)))
-	detail.Sections = append(detail.Sections, ownerSection(secret.OwnerReferences))
+	detail.Sections = append(detail.Sections, ownerSection(secret.Namespace, secret.OwnerReferences))
 	return compactDetail(detail)
 }
 
@@ -714,7 +714,7 @@ func horizontalPodAutoscalerDetail(hpa autoscalingv2.HorizontalPodAutoscaler) Re
 	detail := detailBase(KindHorizontalPodAutoscalers, "HPAs", hpa.ObjectMeta, row.Status, row.StatusKey)
 	detail.YAML = resourceYAML(yamlHPA)
 	detail.Fields = detailFields("Namespace", hpa.Namespace, "Reference", hpa.Spec.ScaleTargetRef.Kind+"/"+hpa.Spec.ScaleTargetRef.Name, "Min", row.Cells[3].Value, "Max", row.Cells[4].Value, "Current Replicas", fmt.Sprint(hpa.Status.CurrentReplicas))
-	detail.Sections = append(detail.Sections, ownerSection(hpa.OwnerReferences))
+	detail.Sections = append(detail.Sections, ownerSection(hpa.Namespace, hpa.OwnerReferences))
 	return compactDetail(detail)
 }
 
@@ -726,7 +726,7 @@ func podDisruptionBudgetDetail(pdb policyv1.PodDisruptionBudget) ResourceDetail 
 	detail := detailBase(KindPodDisruptionBudgets, "PodDisruptionBudgets", pdb.ObjectMeta, row.Status, row.StatusKey)
 	detail.YAML = resourceYAML(yamlPDB)
 	detail.Fields = detailFields("Namespace", pdb.Namespace, "Min Available", intOrStringValue(pdb.Spec.MinAvailable), "Max Unavailable", intOrStringValue(pdb.Spec.MaxUnavailable), "Disruptions Allowed", fmt.Sprint(pdb.Status.DisruptionsAllowed), "Current Healthy", fmt.Sprint(pdb.Status.CurrentHealthy), "Desired Healthy", fmt.Sprint(pdb.Status.DesiredHealthy))
-	detail.Sections = append(detail.Sections, DetailSection{Title: "Selector", Fields: selectorFields(pdb.Spec.Selector)}, ownerSection(pdb.OwnerReferences))
+	detail.Sections = append(detail.Sections, DetailSection{Title: "Selector", Fields: selectorFields(pdb.Spec.Selector)}, ownerSection(pdb.Namespace, pdb.OwnerReferences))
 	return compactDetail(detail)
 }
 
@@ -738,7 +738,7 @@ func resourceQuotaDetail(quota corev1.ResourceQuota) ResourceDetail {
 	detail := detailBase(KindResourceQuotas, "ResourceQuotas", quota.ObjectMeta, row.Status, row.StatusKey)
 	detail.YAML = resourceYAML(yamlQuota)
 	detail.Fields = detailFields("Namespace", quota.Namespace, "Hard", fmt.Sprint(len(quota.Status.Hard)), "Used", fmt.Sprint(len(quota.Status.Used)))
-	detail.Sections = append(detail.Sections, DetailSection{Title: "Hard", Fields: resourceListFields(quota.Status.Hard)}, DetailSection{Title: "Used", Fields: resourceListFields(quota.Status.Used)}, ownerSection(quota.OwnerReferences))
+	detail.Sections = append(detail.Sections, DetailSection{Title: "Hard", Fields: resourceListFields(quota.Status.Hard)}, DetailSection{Title: "Used", Fields: resourceListFields(quota.Status.Used)}, ownerSection(quota.Namespace, quota.OwnerReferences))
 	return compactDetail(detail)
 }
 
@@ -750,7 +750,7 @@ func limitRangeDetail(limitRange corev1.LimitRange) ResourceDetail {
 	detail := detailBase(KindLimitRanges, "LimitRanges", limitRange.ObjectMeta, row.Status, row.StatusKey)
 	detail.YAML = resourceYAML(yamlLimitRange)
 	detail.Fields = detailFields("Namespace", limitRange.Namespace, "Limits", fmt.Sprint(len(limitRange.Spec.Limits)))
-	detail.Sections = append(detail.Sections, ownerSection(limitRange.OwnerReferences))
+	detail.Sections = append(detail.Sections, ownerSection(limitRange.Namespace, limitRange.OwnerReferences))
 	return compactDetail(detail)
 }
 
@@ -873,16 +873,29 @@ func eventMatchesDetail(ref corev1.ObjectReference, detail ResourceDetail) bool 
 }
 
 func eventTimestamp(event corev1.Event) time.Time {
-	switch {
-	case !event.EventTime.IsZero():
-		return event.EventTime.Time
-	case !event.LastTimestamp.IsZero():
-		return event.LastTimestamp.Time
-	case !event.FirstTimestamp.IsZero():
-		return event.FirstTimestamp.Time
-	default:
-		return event.CreationTimestamp.Time
+	timestamps := []time.Time{}
+	if !event.EventTime.IsZero() {
+		timestamps = append(timestamps, event.EventTime.Time)
 	}
+	if !event.FirstTimestamp.IsZero() {
+		timestamps = append(timestamps, event.FirstTimestamp.Time)
+	}
+	if !event.LastTimestamp.IsZero() {
+		timestamps = append(timestamps, event.LastTimestamp.Time)
+	}
+	if event.Series != nil && !event.Series.LastObservedTime.IsZero() {
+		timestamps = append(timestamps, event.Series.LastObservedTime.Time)
+	}
+	if !event.CreationTimestamp.IsZero() {
+		timestamps = append(timestamps, event.CreationTimestamp.Time)
+	}
+	latest := time.Time{}
+	for _, timestamp := range timestamps {
+		if timestamp.After(latest) {
+			latest = timestamp
+		}
+	}
+	return latest
 }
 
 func resourceObjectKind(kind ResourceKind) string {
@@ -1304,10 +1317,95 @@ func resourceListFields(values corev1.ResourceList) []DetailField {
 	return fields
 }
 
-func ownerSection(owners []metav1.OwnerReference) DetailSection {
+func ownerSection(namespace string, owners []metav1.OwnerReference) DetailSection {
 	fields := make([]DetailField, 0, len(owners))
 	for _, owner := range owners {
-		fields = append(fields, DetailField{Name: owner.Kind, Value: owner.Name})
+		field := DetailField{Name: owner.Kind, Value: owner.Name}
+		if kind, ok := ownerResourceKind(owner.Kind); ok {
+			linkNamespace := namespace
+			if resourceDef(kind).Scope == "cluster" {
+				linkNamespace = ""
+			}
+			field.Link = &DetailLink{Resource: kind, Namespace: linkNamespace, Name: owner.Name}
+		}
+		fields = append(fields, field)
 	}
 	return DetailSection{Title: "Owners", Fields: fields}
+}
+
+func ownerResourceKind(kind string) (ResourceKind, bool) {
+	switch kind {
+	case "Pod":
+		return KindPods, true
+	case "Deployment":
+		return KindDeployments, true
+	case "StatefulSet":
+		return KindStatefulSet, true
+	case "DaemonSet":
+		return KindDaemonSet, true
+	case "ReplicaSet":
+		return KindReplicaSets, true
+	case "Job":
+		return KindJobs, true
+	case "CronJob":
+		return KindCronJobs, true
+	case "PersistentVolumeClaim":
+		return KindPersistentVolumeClaims, true
+	case "PersistentVolume":
+		return KindPersistentVolumes, true
+	case "StorageClass":
+		return KindStorageClasses, true
+	case "Service":
+		return KindServices, true
+	case "Endpoints":
+		return KindEndpoints, true
+	case "EndpointSlice":
+		return KindEndpointSlices, true
+	case "Ingress":
+		return KindIngresses, true
+	case "IngressClass":
+		return KindIngressClasses, true
+	case "NetworkPolicy":
+		return KindNetworkPolicies, true
+	case "ServiceAccount":
+		return KindServiceAccounts, true
+	case "Role":
+		return KindRoles, true
+	case "RoleBinding":
+		return KindRoleBindings, true
+	case "ClusterRole":
+		return KindClusterRoles, true
+	case "ClusterRoleBinding":
+		return KindClusterRoleBindings, true
+	case "ConfigMap":
+		return KindConfigMaps, true
+	case "Secret":
+		return KindSecrets, true
+	case "HorizontalPodAutoscaler":
+		return KindHorizontalPodAutoscalers, true
+	case "PodDisruptionBudget":
+		return KindPodDisruptionBudgets, true
+	case "ResourceQuota":
+		return KindResourceQuotas, true
+	case "LimitRange":
+		return KindLimitRanges, true
+	case "PriorityClass":
+		return KindPriorityClasses, true
+	case "RuntimeClass":
+		return KindRuntimeClasses, true
+	case "Lease":
+		return KindLeases, true
+	case "MutatingWebhookConfiguration":
+		return KindMutatingWebhookConfigurations, true
+	case "ValidatingWebhookConfiguration":
+		return KindValidatingWebhookConfigurations, true
+	case "Node":
+		return KindNodes, true
+	case "Namespace":
+		return KindNamespaces, true
+	case "Event":
+		return KindEvents, true
+	default:
+		return "", false
+	}
 }

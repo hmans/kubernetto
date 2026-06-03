@@ -16,8 +16,28 @@ func TestResolveListenAddr(t *testing.T) {
 			want: "127.0.0.1:9832",
 		},
 		{
-			name: "custom addr",
-			opts: serverOptions{addr: "0.0.0.0:8080"},
+			name: "custom loopback addr",
+			opts: serverOptions{addr: "localhost:8080"},
+			want: "localhost:8080",
+		},
+		{
+			name: "custom ipv6 loopback addr",
+			opts: serverOptions{addr: "[::1]:8080"},
+			want: "[::1]:8080",
+		},
+		{
+			name:    "custom wildcard addr requires opt in",
+			opts:    serverOptions{addr: "0.0.0.0:8080"},
+			wantErr: "refusing non-loopback --addr without --allow-remote; the dashboard has access to Kubernetes cluster data",
+		},
+		{
+			name:    "custom private addr requires opt in",
+			opts:    serverOptions{addr: "192.168.1.10:8080"},
+			wantErr: "refusing non-loopback --addr without --allow-remote; the dashboard has access to Kubernetes cluster data",
+		},
+		{
+			name: "custom remote addr with opt in",
+			opts: serverOptions{addr: "0.0.0.0:8080", allowRemote: true},
 			want: "0.0.0.0:8080",
 		},
 		{

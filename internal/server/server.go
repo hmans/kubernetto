@@ -152,7 +152,7 @@ func (s *Server) handlePrometheusChart(w http.ResponseWriter, r *http.Request) {
 			Metrics:   unavailableChartMetrics("No Kubernetes client is configured."),
 		}
 		if session != nil && session.store != nil && name != "" {
-			chart = session.store.PodUsageDetailChart(namespace, name, params.Get("cpu"), params.Get("memory"))
+			chart = session.store.PodUsageDetailChart(namespace, name, "", "")
 		}
 		sse.PatchElements(ui.RenderFragment(ui.DetailPodUsagePanel(chart)))
 		return
@@ -160,7 +160,7 @@ func (s *Server) handlePrometheusChart(w http.ResponseWriter, r *http.Request) {
 
 	chart := kube.PodUsageOverviewChart{Metrics: unavailableChartMetrics("No Kubernetes client is configured.")}
 	if session != nil && session.store != nil {
-		chart = session.store.PodUsageOverviewChart(params.Get("cpu"), params.Get("memory"), chartLimit(params.Get("limit")))
+		chart = session.store.PodUsageOverviewChart("", "", chartLimit(params.Get("limit")))
 	}
 	sse.PatchElements(ui.RenderFragment(ui.OverviewPodUsagePanel(chart)))
 }
@@ -186,6 +186,10 @@ func (s *Server) handlePrometheusQueryRange(w http.ResponseWriter, r *http.Reque
 	}
 	if len(request.Queries) > prometheusQueryRangeMaxQueries {
 		writeCompressedJSON(w, r, http.StatusBadRequest, map[string]string{"error": "at most twelve PromQL queries can be loaded at once"})
+		return
+	}
+	if err := kube.ValidatePrometheusRangeQueries(request.Queries); err != nil {
+		writeCompressedJSON(w, r, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -244,7 +248,7 @@ func (s *Server) state(signals ui.Signals) ui.PageState {
 	if def.Scope == "cluster" {
 		selectedNamespace = ""
 	}
-	if kind == kube.KindOverview {
+	if isStandalonePageKind(kind) {
 		namespace = ""
 		selectedNamespace = ""
 		signals.SelectedName = ""
@@ -254,7 +258,7 @@ func (s *Server) state(signals ui.Signals) ui.PageState {
 	}
 	activeContexts := s.activeContexts(signals.Clusters)
 	signals.Clusters = strings.Join(s.selectedContexts(signals.Clusters), ",")
-	if kind == kube.KindOverview && len(activeContexts) == 1 {
+	if isStandalonePageKind(kind) && len(activeContexts) == 1 {
 		session = s.session(activeContexts[0])
 		if session != nil && session.cluster != nil {
 			contextName = session.cluster.ContextName
@@ -263,6 +267,7 @@ func (s *Server) state(signals ui.Signals) ui.PageState {
 
 	summary := kube.Summary{UpdatedAt: time.Now(), Error: "No Kubernetes client is configured."}
 	fleet := ui.FleetOverview{UpdatedAt: time.Now()}
+	actions := ui.ActionList{UpdatedAt: time.Now(), Error: "No Kubernetes client is configured."}
 	overview := kube.ClusterOverview{UpdatedAt: time.Now(), Error: "No Kubernetes client is configured."}
 	table := kube.Table{Kind: kind, Label: def.Label, Namespace: namespace, Query: signals.Query, SortColumn: signals.SortColumn, SortOrder: signals.SortOrder, UpdatedAt: time.Now(), Namespaced: def.Scope == "namespaced"}
 	detail := kube.ResourceDetail{Kind: kind, Label: def.Label, Name: signals.SelectedName, Namespace: selectedNamespace}
@@ -272,8 +277,9 @@ func (s *Server) state(signals ui.Signals) ui.PageState {
 	if session != nil && session.store != nil {
 		summary = s.summary(activeContexts)
 		fleet = s.fleetOverview(activeContexts)
+		actions = s.actionItems(activeContexts)
 		overview = session.store.Overview()
-		if kind != kube.KindOverview {
+		if !isStandalonePageKind(kind) {
 			table = s.table(kind, namespace, signals.Query, signals.SortColumn, signals.SortOrder, activeContexts)
 			detail = session.store.Detail(kind, selectedNamespace, signals.SelectedName)
 		}
@@ -292,6 +298,7 @@ func (s *Server) state(signals ui.Signals) ui.PageState {
 		Signals:        ui.Signals{Context: contextName, Clusters: signals.Clusters, Resource: string(kind), Namespace: namespace, Query: signals.Query, SortColumn: table.SortColumn, SortOrder: table.SortOrder, SelectedName: signals.SelectedName, SelectedNamespace: selectedNamespace, DetailMode: detailMode},
 		Summary:        summary,
 		Fleet:          fleet,
+		Actions:        actions,
 		Overview:       overview,
 		Table:          table,
 		Detail:         detail,
@@ -570,6 +577,101 @@ func (s *Server) fleetOverview(contexts []string) ui.FleetOverview {
 	return out
 }
 
+func (s *Server) actionItems(contexts []string) ui.ActionList {
+	sessions := s.sessionsForContexts(contexts)
+	s.waitForInitialSyncs(sessions)
+	out := ui.ActionList{UpdatedAt: time.Now()}
+	if len(sessions) == 0 {
+		out.Error = "No Kubernetes client is configured."
+		return out
+	}
+	for _, session := range sessions {
+		if session == nil || session.cluster == nil || session.store == nil {
+			continue
+		}
+		overview := session.store.Overview()
+		if overview.UpdatedAt.After(out.UpdatedAt) {
+			out.UpdatedAt = overview.UpdatedAt
+		}
+		contextName := session.cluster.ContextName
+		if overview.Error != "" {
+			out.Items = append(out.Items, ui.ActionItem{
+				Context:     contextName,
+				Title:       "Cluster data unavailable",
+				Detail:      overview.Error,
+				StatusKey:   "danger",
+				TargetKind:  kube.KindOverview,
+				ActionLabel: "Open overview",
+			})
+			continue
+		}
+		for _, event := range overview.WarningEvents {
+			query := firstNonEmpty(event.Reason, event.InvolvedObject)
+			out.Items = append(out.Items, ui.ActionItem{
+				Context:         contextName,
+				Title:           firstNonEmpty(event.Reason, "Warning event"),
+				Detail:          eventDetail(event),
+				Message:         event.Message,
+				Namespace:       event.Namespace,
+				Object:          event.InvolvedObject,
+				Reason:          event.Reason,
+				Age:             event.Age,
+				Count:           event.Count,
+				StatusKey:       "warn",
+				TargetKind:      kube.KindEvents,
+				TargetQuery:     query,
+				TargetName:      event.Name,
+				TargetNamespace: event.Namespace,
+				ActionLabel:     "Open events",
+				LastSeen:        event.LastSeen,
+			})
+		}
+		for _, metric := range []kube.OverviewMetric{
+			overviewMetric(overview.Stats, "Nodes ready"),
+			overviewMetric(overview.Stats, "Pods healthy"),
+			overviewMetric(overview.Stats, "Workloads ready"),
+		} {
+			if metric.StatusKey != "warn" && metric.StatusKey != "danger" {
+				continue
+			}
+			out.Items = append(out.Items, ui.ActionItem{
+				Context:     contextName,
+				Title:       metric.Label + " " + metric.Value,
+				Detail:      firstNonEmpty(metric.Detail, "Current readiness is degraded."),
+				StatusKey:   metric.StatusKey,
+				TargetKind:  metric.Kind,
+				ActionLabel: "Open " + strings.ToLower(resourceDef(metric.Kind).Label),
+			})
+		}
+	}
+	sort.SliceStable(out.Items, func(i, j int) bool {
+		left := fleetStatusRank(out.Items[i].StatusKey)
+		right := fleetStatusRank(out.Items[j].StatusKey)
+		if left != right {
+			return left < right
+		}
+		if !out.Items[i].LastSeen.Equal(out.Items[j].LastSeen) {
+			return out.Items[i].LastSeen.After(out.Items[j].LastSeen)
+		}
+		if out.Items[i].Context != out.Items[j].Context {
+			return strings.ToLower(out.Items[i].Context) < strings.ToLower(out.Items[j].Context)
+		}
+		return strings.ToLower(out.Items[i].Title) < strings.ToLower(out.Items[j].Title)
+	})
+	return out
+}
+
+func eventDetail(event kube.OverviewEvent) string {
+	parts := []string{}
+	if event.InvolvedObject != "" {
+		parts = append(parts, event.InvolvedObject)
+	}
+	if event.Namespace != "" {
+		parts = append(parts, event.Namespace)
+	}
+	return strings.Join(parts, " · ")
+}
+
 func fleetClusterFromOverview(contextName string, overview kube.ClusterOverview) ui.FleetCluster {
 	nodes := overviewMetric(overview.Stats, "Nodes ready")
 	pods := overviewMetric(overview.Stats, "Pods healthy")
@@ -672,6 +774,10 @@ func fleetStatusRank(statusKey string) int {
 	default:
 		return 3
 	}
+}
+
+func isStandalonePageKind(kind kube.ResourceKind) bool {
+	return kind == kube.KindOverview || kind == kube.KindActions
 }
 
 func (s *Server) table(kind kube.ResourceKind, namespace, query, sortColumn, sortOrder string, contexts []string) kube.Table {

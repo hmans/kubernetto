@@ -5,7 +5,7 @@ A small Kubernetes dashboard built as a single Go binary with a server-rendered 
 ## Run
 
 ```sh
-mise run dev
+mise dev
 ```
 
 Then open <http://127.0.0.1:9832>.
@@ -13,13 +13,21 @@ Then open <http://127.0.0.1:9832>.
 Kubernetto loads every context from your kubeconfig, selecting the active context by default and falling back to in-cluster config when available. You can override either the listen address or kubeconfig path:
 
 ```sh
-mise run app --addr 127.0.0.1:9833 --kubeconfig ~/.kube/config
+mise dev --addr 127.0.0.1:9833 --kubeconfig ~/.kube/config
 ```
 
 You can also set only the local listen port:
 
 ```sh
-mise run app --port 9833
+mise dev --port 9833
+```
+
+By default, Kubernetto refuses non-loopback listen addresses because the
+dashboard can read Kubernetes cluster data using your kubeconfig credentials.
+If you intentionally need to expose it to your network, opt in explicitly:
+
+```sh
+mise run app --addr 0.0.0.0:9832 --allow-remote
 ```
 
 ## Build

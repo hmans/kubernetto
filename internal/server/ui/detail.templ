@@ -64,7 +64,9 @@ templ DetailOverviewView(state PageState) {
 		for _, field := range state.Detail.Fields {
 			<div>
 				<dt>{ field.Name }</dt>
-				<dd>{ field.Value }</dd>
+				<dd>
+					@DetailFieldValue(field, state.Signals)
+				</dd>
 			</div>
 		}
 	</dl>
@@ -72,13 +74,13 @@ templ DetailOverviewView(state PageState) {
 		@DetailPodUsagePanelPlaceholder(state.Detail)
 	}
 	for _, section := range state.Detail.Sections {
-		@DetailSectionView(section)
+		@DetailSectionView(section, state.Signals)
 	}
 	if len(state.Detail.Labels) > 0 {
-		@DetailSectionView(kube.DetailSection{Title: "Labels", Fields: state.Detail.Labels})
+		@DetailSectionView(kube.DetailSection{Title: "Labels", Fields: state.Detail.Labels}, state.Signals)
 	}
 	if len(state.Detail.Annotations) > 0 {
-		@DetailSectionView(kube.DetailSection{Title: "Annotations", Fields: state.Detail.Annotations})
+		@DetailSectionView(kube.DetailSection{Title: "Annotations", Fields: state.Detail.Annotations}, state.Signals)
 	}
 }
 
@@ -123,16 +125,26 @@ templ DetailYAMLView(value string) {
 	}
 }
 
-templ DetailSectionView(section kube.DetailSection) {
+templ DetailSectionView(section kube.DetailSection, signals Signals) {
 	<section class="border-t border-[var(--line)] px-3.5 pb-3.5 pt-3">
 		<h3 class="m-0 mb-2.5 text-[13px] leading-[1.2]">{ section.Title }</h3>
 		<dl class="detail-list compact">
 			for _, field := range section.Fields {
 				<div>
 					<dt>{ field.Name }</dt>
-					<dd>{ field.Value }</dd>
+					<dd>
+						@DetailFieldValue(field, signals)
+					</dd>
 				</div>
 			}
 		</dl>
 	</section>
+}
+
+templ DetailFieldValue(field kube.DetailField, signals Signals) {
+	if field.Link != nil {
+		<a { detailFieldLinkAttrs(field, signals)... }>{ field.Value }</a>
+	} else {
+		{ field.Value }
+	}
 }
