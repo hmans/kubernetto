@@ -1,7 +1,9 @@
 {
   "private": true,
   "scripts": {
-    "build:assets": "vite build"
+    "typecheck": "tsc --noEmit",
+    "test:assets": "vitest run --environment jsdom",
+    "build:assets": "tsc --noEmit && vite build"
   },
   "devDependencies": {
     "@fontsource-variable/inter": "^5.2.8",
@@ -9,7 +11,10 @@
     "@iconify-json/uil": "^1.2.3",
     "@iconify/tailwind4": "^1.2.3",
     "@tailwindcss/vite": "^4.3.0",
+    "jsdom": "^29.1.1",
     "tailwindcss": "^4.3.0",
-    "vite": "^7.0.0"
+    "typescript": "^6.0.3",
+    "vite": "^7.0.0",
+    "vitest": "^4.1.8"
   }
 }
