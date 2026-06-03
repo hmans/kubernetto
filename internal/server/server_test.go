@@ -75,11 +75,33 @@ func TestHandleIndexDefaultsToClusterOverview(t *testing.T) {
 	if !strings.Contains(body, `data-signals:resource="&#34;overview&#34;"`) {
 		t.Fatalf("index did not render overview resource signal")
 	}
-	if !strings.Contains(body, `datastar@v1.0.2`) {
-		t.Fatalf("index did not render version-locked Datastar asset")
+	if !strings.Contains(body, `src="/assets/datastar.js"`) {
+		t.Fatalf("index did not render bundled Datastar asset")
+	}
+	if strings.Contains(body, `cdn.jsdelivr.net`) {
+		t.Fatalf("index rendered external Datastar CDN asset")
 	}
 	if !strings.Contains(body, "Cluster Overview") {
 		t.Fatalf("index did not render cluster overview")
+	}
+}
+
+func TestRoutesSetTightenedSecurityHeaders(t *testing.T) {
+	app := New(nil, context.Background(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	res := httptest.NewRecorder()
+
+	app.Routes().ServeHTTP(res, req)
+
+	csp := res.Header().Get("Content-Security-Policy")
+	if !strings.Contains(csp, "script-src 'self' 'unsafe-eval'") {
+		t.Fatalf("csp script-src = %q, want self with Datastar eval allowance", csp)
+	}
+	if strings.Contains(csp, "cdn.jsdelivr.net") {
+		t.Fatalf("csp still allows jsDelivr: %q", csp)
+	}
+	if !strings.Contains(csp, "connect-src 'self'") {
+		t.Fatalf("csp connect-src = %q, want self", csp)
 	}
 }
 
@@ -747,6 +769,12 @@ func TestAssetEndpoints(t *testing.T) {
 			path:        "/assets/README.txt",
 			contentType: "text/plain",
 			body:        "Generated frontend bundles",
+		},
+		{
+			name:        "bundled datastar asset",
+			path:        "/assets/datastar.js",
+			contentType: "text/javascript",
+			body:        "Datastar v1.0.2",
 		},
 	}
 
