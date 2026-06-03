@@ -805,7 +805,7 @@ func (s *Server) table(kind kube.ResourceKind, namespace, query, sortColumn, sor
 		if session.store == nil {
 			continue
 		}
-		table := session.store.TableWithSort(kind, namespace, "", "", "")
+		table := session.store.TableWithSort(kind, namespace, query, "", "")
 		if len(out.Columns) == 0 && len(table.Columns) > 0 {
 			out.Columns = append([]string{"Cluster"}, table.Columns...)
 		}
@@ -822,7 +822,6 @@ func (s *Server) table(kind kube.ResourceKind, namespace, query, sortColumn, sor
 	if len(out.Columns) == 0 {
 		out.Columns = append([]string{"Cluster"}, kube.Table{Kind: kind}.Columns...)
 	}
-	kube.FilterTableRows(&out, query)
 	kube.SortTableRows(&out, sortColumn, sortOrder)
 	out.Error = strings.Join(errors, "\n")
 	return out

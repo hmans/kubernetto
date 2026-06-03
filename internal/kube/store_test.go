@@ -270,6 +270,51 @@ func TestResourceStoreReadsDoNotCallKubeAPI(t *testing.T) {
 	}
 }
 
+func TestResourceStoreTableQueryMatchesOnlyResourceName(t *testing.T) {
+	clientset := fake.NewSimpleClientset(
+		testPod("api", "prod", 0),
+		testPod("worker", "default", 0),
+		&appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{Name: "alice-backend", Namespace: "chatto-dev"},
+			Spec: appsv1.DeploymentSpec{
+				Replicas: ptr(int32(1)),
+				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "alice-backend"}},
+				Template: corev1.PodTemplateSpec{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "alice-backend"}},
+					Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "alice-backend"}}},
+				},
+			},
+			Status: appsv1.DeploymentStatus{ReadyReplicas: 1},
+		},
+		&appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{Name: "chatto-hub", Namespace: "platform"},
+			Spec: appsv1.DeploymentSpec{
+				Replicas: ptr(int32(1)),
+				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "chatto-hub"}},
+				Template: corev1.PodTemplateSpec{
+					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "chatto-hub"}},
+					Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "chatto-hub"}}},
+				},
+			},
+			Status: appsv1.DeploymentStatus{ReadyReplicas: 1},
+		},
+	)
+	store := syncedTestStore(t, clientset)
+
+	if got := rowNames(store.Table(KindPods, "", "prod").Rows); len(got) != 0 {
+		t.Fatalf("pod query matched namespace instead of name: %#v", got)
+	}
+	if got := rowNames(store.Table(KindPods, "", "Running").Rows); len(got) != 0 {
+		t.Fatalf("pod query matched status instead of name: %#v", got)
+	}
+	if got, want := rowNames(store.Table(KindPods, "", "api").Rows), []string{"api"}; !equalStrings(got, want) {
+		t.Fatalf("pod query by name = %#v, want %#v", got, want)
+	}
+	if got, want := rowNames(store.Table(KindDeployments, "", "chatto").Rows), []string{"chatto-hub"}; !equalStrings(got, want) {
+		t.Fatalf("deployment query by name = %#v, want %#v", got, want)
+	}
+}
+
 func TestResourceStoreTablesAndDetailsForExpandedResources(t *testing.T) {
 	port := int32(8080)
 	protocol := corev1.ProtocolTCP

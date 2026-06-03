@@ -39,6 +39,38 @@ describe("fleet card URL sync", () => {
   });
 });
 
+describe("search shortcut", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    window.history.replaceState({}, "", "/");
+  });
+
+  it("focuses the table search input when slash is pressed", () => {
+    document.body.innerHTML = `<input id="query" type="search" />`;
+
+    const event = new KeyboardEvent("keydown", { key: "/", bubbles: true, cancelable: true });
+    const dispatched = document.dispatchEvent(event);
+
+    expect(dispatched).toBe(false);
+    expect(document.activeElement).toBe(document.querySelector("#query"));
+  });
+
+  it("leaves slash alone while typing in an input", () => {
+    document.body.innerHTML = `
+      <input id="query" type="search" />
+      <input id="other" type="text" />
+    `;
+    const other = document.querySelector<HTMLInputElement>("#other");
+    other?.focus();
+
+    const event = new KeyboardEvent("keydown", { key: "/", bubbles: true, cancelable: true });
+    const dispatched = other?.dispatchEvent(event);
+
+    expect(dispatched).toBe(true);
+    expect(document.activeElement).toBe(other);
+  });
+});
+
 describe("action item URL sync", () => {
   beforeEach(() => {
     document.body.innerHTML = "";
