@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -609,7 +610,8 @@ func TestChartEndpointsRenderPatchFragments(t *testing.T) {
 
 func TestPrometheusQueryRangeEndpointReturnsCompressedJSON(t *testing.T) {
 	app := New(nil, context.Background(), nil)
-	req := httptest.NewRequest(http.MethodPost, "/ui/prometheus/query-range", strings.NewReader(`{"queries":[{"name":"cpu","query":"up"}]}`))
+	requestBody := `{"queries":[{"name":"cpu","query":` + strconv.Quote(kube.PodCPUQuery()) + `}]}`
+	req := httptest.NewRequest(http.MethodPost, "/ui/prometheus/query-range", strings.NewReader(requestBody))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept-Encoding", "gzip")
 	res := httptest.NewRecorder()
@@ -642,6 +644,22 @@ func TestPrometheusQueryRangeEndpointReturnsCompressedJSON(t *testing.T) {
 	}
 	if payload.Message != "No Kubernetes client is configured." {
 		t.Fatalf("message = %q", payload.Message)
+	}
+}
+
+func TestPrometheusQueryRangeEndpointRejectsGenericPromQL(t *testing.T) {
+	app := New(nil, context.Background(), nil)
+	req := httptest.NewRequest(http.MethodPost, "/ui/prometheus/query-range", strings.NewReader(`{"queries":[{"name":"cpu","query":"up"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	res := httptest.NewRecorder()
+
+	app.Routes().ServeHTTP(res, req)
+
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", res.Code, http.StatusBadRequest)
+	}
+	if body := res.Body.String(); !strings.Contains(body, "not an allowed pod usage query") {
+		t.Fatalf("body did not contain validation error: %s", body)
 	}
 }
 
