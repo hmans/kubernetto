@@ -29,6 +29,7 @@ type ResourceKind string
 
 const (
 	KindOverview                        ResourceKind = "overview"
+	KindActions                         ResourceKind = "actions"
 	KindPods                            ResourceKind = "pods"
 	KindDeployments                     ResourceKind = "deployments"
 	KindStatefulSet                     ResourceKind = "statefulsets"
@@ -83,6 +84,7 @@ type ResourceGroupDef struct {
 
 var ResourceDefs = []ResourceDef{
 	{Kind: KindOverview, Label: "Overview", Scope: "cluster", Group: "overview", Default: true},
+	{Kind: KindActions, Label: "Issues", Scope: "cluster", Group: "overview"},
 	{Kind: KindPods, Label: "Pods", Scope: "namespaced", Group: "workloads", Default: true},
 	{Kind: KindDeployments, Label: "Deployments", Scope: "namespaced", Group: "workloads"},
 	{Kind: KindStatefulSet, Label: "StatefulSets", Scope: "namespaced", Group: "workloads"},
@@ -121,7 +123,7 @@ var ResourceDefs = []ResourceDef{
 }
 
 var ResourceGroups = []ResourceGroupDef{
-	{ID: "overview", Label: "Overview", DefaultKind: KindOverview, Kinds: []ResourceKind{KindOverview}},
+	{ID: "overview", Label: "Overview", DefaultKind: KindOverview, Kinds: []ResourceKind{KindOverview, KindActions}},
 	{ID: "workloads", Label: "Workloads", DefaultKind: KindPods, Kinds: []ResourceKind{KindPods, KindDeployments, KindStatefulSet, KindDaemonSet, KindReplicaSets, KindJobs, KindCronJobs}},
 	{ID: "storage", Label: "Storage", DefaultKind: KindPersistentVolumeClaims, Kinds: []ResourceKind{KindPersistentVolumeClaims, KindPersistentVolumes, KindStorageClasses}},
 	{ID: "network", Label: "Network", DefaultKind: KindServices, Kinds: []ResourceKind{KindServices, KindEndpoints, KindEndpointSlices, KindIngresses, KindIngressClasses, KindNetworkPolicies}},
@@ -175,6 +177,7 @@ type OverviewRatio struct {
 }
 
 type OverviewEvent struct {
+	Name           string
 	Type           string
 	Reason         string
 	Message        string
@@ -1717,15 +1720,30 @@ func age(t time.Time) string {
 		return ""
 	}
 	d := time.Since(t)
+	if d < 0 {
+		return "just now"
+	}
 	switch {
 	case d < time.Minute:
-		return fmt.Sprintf("%ds", int(d.Seconds()))
+		return "just now"
 	case d < time.Hour:
-		return fmt.Sprintf("%dm", int(d.Minutes()))
+		minutes := int(d.Minutes())
+		if minutes == 1 {
+			return "1m ago"
+		}
+		return fmt.Sprintf("%dm ago", minutes)
 	case d < 48*time.Hour:
-		return fmt.Sprintf("%dh", int(d.Hours()))
+		hours := int(d.Hours())
+		if hours == 1 {
+			return "1h ago"
+		}
+		return fmt.Sprintf("%dh ago", hours)
 	default:
-		return fmt.Sprintf("%dd", int(d.Hours()/24))
+		days := int(d.Hours() / 24)
+		if days == 1 {
+			return "1d ago"
+		}
+		return fmt.Sprintf("%dd ago", days)
 	}
 }
 

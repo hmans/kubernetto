@@ -48,6 +48,7 @@ func (s *ResourceStore) Overview() ClusterOverview {
 	}
 
 	healthyPods := 0
+	actionablePods := 0
 	pendingPods := 0
 	failedPods := 0
 	succeededPods := 0
@@ -59,7 +60,9 @@ func (s *ResourceStore) Overview() ClusterOverview {
 			failedPods++
 		case corev1.PodSucceeded:
 			succeededPods++
+			continue
 		}
+		actionablePods++
 		if podHealthy(*pod) {
 			healthyPods++
 		}
@@ -68,8 +71,8 @@ func (s *ResourceStore) Overview() ClusterOverview {
 	readyWorkloads, totalWorkloads := workloadHealth(deployments, statefulSets, daemonSets)
 	overview.Stats = []OverviewMetric{
 		{Label: "Nodes ready", Value: fmt.Sprintf("%d/%d", readyNodes, len(nodes)), StatusKey: healthKey(readyNodes == len(nodes) && len(nodes) > 0), Kind: KindNodes, Ratio: countRatio(readyNodes, len(nodes))},
-		{Label: "Pods healthy", Value: fmt.Sprintf("%d/%d", healthyPods, len(pods)), Detail: podPhaseDetail(pendingPods, failedPods, succeededPods), StatusKey: healthKey(healthyPods == len(pods) && len(pods) > 0), Kind: KindPods, Ratio: countRatio(healthyPods, len(pods))},
-		{Label: "Workloads ready", Value: fmt.Sprintf("%d/%d", readyWorkloads, totalWorkloads), StatusKey: healthKey(readyWorkloads == totalWorkloads && totalWorkloads > 0), Kind: KindDeployments, Ratio: countRatio(readyWorkloads, totalWorkloads)},
+		{Label: "Pods healthy", Value: fmt.Sprintf("%d/%d", healthyPods, actionablePods), Detail: podPhaseDetail(pendingPods, failedPods, succeededPods), StatusKey: healthKey(actionablePods == 0 || healthyPods == actionablePods), Kind: KindPods, Ratio: countRatio(healthyPods, actionablePods)},
+		{Label: "Workloads ready", Value: fmt.Sprintf("%d/%d", readyWorkloads, totalWorkloads), StatusKey: healthKey(totalWorkloads == 0 || readyWorkloads == totalWorkloads), Kind: KindDeployments, Ratio: countRatio(readyWorkloads, totalWorkloads)},
 		{Label: "Warnings", Value: fmt.Sprint(len(warningEvents)), Detail: "Recent warning events", Kind: KindOverview},
 	}
 	overview.Stats = append(overview.Stats, usageMetrics(usage, allocatable)...)
@@ -139,7 +142,7 @@ func podPhaseDetail(pending, failed, succeeded int) string {
 		parts = append(parts, fmt.Sprintf("%d failed", failed))
 	}
 	if succeeded > 0 {
-		parts = append(parts, fmt.Sprintf("%d succeeded", succeeded))
+		parts = append(parts, fmt.Sprintf("%d completed", succeeded))
 	}
 	if len(parts) == 0 {
 		return "No pending or failed pods"
@@ -341,6 +344,7 @@ func (s *ResourceStore) recentWarningEvents(limit int) []OverviewEvent {
 		}
 		lastSeen := eventTimestamp(*event)
 		events = append(events, OverviewEvent{
+			Name:           event.Name,
 			Type:           event.Type,
 			Reason:         event.Reason,
 			Message:        event.Message,

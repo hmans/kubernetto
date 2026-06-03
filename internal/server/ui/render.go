@@ -27,6 +27,7 @@ type PageState struct {
 	Signals        Signals
 	Summary        kube.Summary
 	Fleet          FleetOverview
+	Actions        ActionList
 	Overview       kube.ClusterOverview
 	Table          kube.Table
 	Detail         kube.ResourceDetail
@@ -60,6 +61,31 @@ type FleetCluster struct {
 type FleetWarningEvent struct {
 	Cluster string
 	Event   kube.OverviewEvent
+}
+
+type ActionList struct {
+	Error     string
+	UpdatedAt time.Time
+	Items     []ActionItem
+}
+
+type ActionItem struct {
+	Context         string
+	Title           string
+	Detail          string
+	Message         string
+	Namespace       string
+	Object          string
+	Reason          string
+	Age             string
+	Count           int32
+	StatusKey       string
+	TargetKind      kube.ResourceKind
+	TargetQuery     string
+	TargetName      string
+	TargetNamespace string
+	ActionLabel     string
+	LastSeen        time.Time
 }
 
 type ResourceNavGroup struct {
@@ -136,9 +162,20 @@ func isOverview(state PageState) bool {
 	return state.Signals.Resource == string(kube.KindOverview)
 }
 
+func isActionItems(state PageState) bool {
+	return state.Signals.Resource == string(kube.KindActions)
+}
+
+func isStandalonePage(state PageState) bool {
+	return isOverview(state) || isActionItems(state)
+}
+
 func pageTitle(state PageState) string {
 	if isOverview(state) {
 		return "Cluster Dashboard"
+	}
+	if isActionItems(state) {
+		return "Issues"
 	}
 	return state.Table.Label
 }
@@ -177,6 +214,10 @@ func tableAutoRefreshAttrs(state PageState) templ.Attributes {
 	if isOverview(state) {
 		return attrs
 	}
+	if isActionItems(state) {
+		attrs["data-on-interval__duration.10s"] = "@get('/ui/table')"
+		return attrs
+	}
 	attrs["data-on-interval__duration.5s"] = "@get('/ui/table')"
 	return attrs
 }
@@ -194,6 +235,8 @@ func resourceButtonIconClass(kind kube.ResourceKind) string {
 	switch kind {
 	case kube.KindOverview:
 		return "icon-[uil--dashboard]"
+	case kube.KindActions:
+		return "icon-[lucide--list-checks]"
 	case kube.KindPods:
 		return "icon-[uil--cube]"
 	case kube.KindDeployments:
@@ -321,7 +364,7 @@ func resourceGroupActive(group ResourceNavGroup, activeResource string) bool {
 }
 
 func resourceGroupChildren(group ResourceNavGroup) []kube.ResourceDef {
-	if group.ID == "overview" {
+	if group.ID == "overview" && len(group.Resources) <= 1 {
 		return nil
 	}
 	return group.Resources
@@ -559,6 +602,29 @@ func fleetMetricValue(metric kube.OverviewMetric) string {
 		return "0"
 	}
 	return metric.Value
+}
+
+func actionItemClass(item ActionItem) string {
+	return "action-item " + item.StatusKey
+}
+
+func actionItemAttrs(item ActionItem) templ.Attributes {
+	endpoint := "/ui/table"
+	if item.TargetKind == kube.KindOverview {
+		endpoint = "/ui/refresh"
+	}
+	return templ.Attributes{
+		"role":                           "button",
+		"tabindex":                       "0",
+		"data-action-context":            item.Context,
+		"data-action-kind":               string(item.TargetKind),
+		"data-action-query":              item.TargetQuery,
+		"data-action-selected-name":      item.TargetName,
+		"data-action-selected-namespace": item.TargetNamespace,
+		"data-indicator:loading":         true,
+		"data-on:click":                  "$context = " + signalLiteral(item.Context) + "; $clusters = " + signalLiteral(item.Context) + "; $resource = " + signalLiteral(string(item.TargetKind)) + "; $namespace = ''; $query = " + signalLiteral(item.TargetQuery) + "; $sortColumn = ''; $sortOrder = ''; $selectedName = " + signalLiteral(item.TargetName) + "; $selectedNamespace = " + signalLiteral(item.TargetNamespace) + "; $detailMode = 'overview'; @get('" + endpoint + "')",
+		"data-on:keydown__enter":         "$context = " + signalLiteral(item.Context) + "; $clusters = " + signalLiteral(item.Context) + "; $resource = " + signalLiteral(string(item.TargetKind)) + "; $namespace = ''; $query = " + signalLiteral(item.TargetQuery) + "; $sortColumn = ''; $sortOrder = ''; $selectedName = " + signalLiteral(item.TargetName) + "; $selectedNamespace = " + signalLiteral(item.TargetNamespace) + "; $detailMode = 'overview'; @get('" + endpoint + "')",
+	}
 }
 
 func searchInputAttrs() templ.Attributes {

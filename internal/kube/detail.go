@@ -873,16 +873,29 @@ func eventMatchesDetail(ref corev1.ObjectReference, detail ResourceDetail) bool 
 }
 
 func eventTimestamp(event corev1.Event) time.Time {
-	switch {
-	case !event.EventTime.IsZero():
-		return event.EventTime.Time
-	case !event.LastTimestamp.IsZero():
-		return event.LastTimestamp.Time
-	case !event.FirstTimestamp.IsZero():
-		return event.FirstTimestamp.Time
-	default:
-		return event.CreationTimestamp.Time
+	timestamps := []time.Time{}
+	if !event.EventTime.IsZero() {
+		timestamps = append(timestamps, event.EventTime.Time)
 	}
+	if !event.FirstTimestamp.IsZero() {
+		timestamps = append(timestamps, event.FirstTimestamp.Time)
+	}
+	if !event.LastTimestamp.IsZero() {
+		timestamps = append(timestamps, event.LastTimestamp.Time)
+	}
+	if event.Series != nil && !event.Series.LastObservedTime.IsZero() {
+		timestamps = append(timestamps, event.Series.LastObservedTime.Time)
+	}
+	if !event.CreationTimestamp.IsZero() {
+		timestamps = append(timestamps, event.CreationTimestamp.Time)
+	}
+	latest := time.Time{}
+	for _, timestamp := range timestamps {
+		if timestamp.After(latest) {
+			latest = timestamp
+		}
+	}
+	return latest
 }
 
 func resourceObjectKind(kind ResourceKind) string {
