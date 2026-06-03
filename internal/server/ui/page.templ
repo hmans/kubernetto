@@ -9,11 +9,11 @@ templ Page(state PageState) {
 			<title>Kubernetto</title>
 			<script type="module" src="/assets/dist/app.js"></script>
 			<link rel="stylesheet" href="/assets/dist/app.css"/>
-			<script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@1.0.0/bundles/datastar.js"></script>
+			<script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.2/bundles/datastar.js"></script>
 		</head>
 		<body>
 			<div id="page-progress" class="page-progress" aria-hidden="true" { progressAttrs()... }></div>
-			<div class="min-h-screen grid grid-cols-[248px_minmax(0,1fr)] max-[860px]:grid-cols-1" { appSignalAttrs(state)... }>
+			<div class="app min-h-screen grid grid-cols-[248px_minmax(0,1fr)] max-[860px]:grid-cols-1" { appSignalAttrs(state)... }>
 				<aside class="bg-[var(--side-bg)] text-[var(--side-text)] px-4 py-[22px] flex flex-col gap-[22px]">
 					<div class="flex items-center gap-2.5 text-lg font-[760]">
 						<div class="grid size-8 place-items-center rounded-[7px] bg-[#0d9488] font-extrabold text-white">K</div>
@@ -84,6 +84,10 @@ templ Page(state PageState) {
 
 templ ContentView(state PageState) {
 	<div id="content-grid" class={ contentGridClass(state) } { tableAutoRefreshAttrs(state)... }>
+		<div class="view-loading" style="display: none;" data-show="$loading" role="status" aria-live="polite">
+			<span class="icon-[lucide--loader-circle]" aria-hidden="true"></span>
+			<span>Loading</span>
+		</div>
 		if isOverview(state) {
 			@OverviewView(state)
 		} else {
@@ -96,17 +100,33 @@ templ ContentView(state PageState) {
 }
 
 templ ResourceNavView(state PageState) {
-	<nav id="resource-nav" class="grid gap-[5px]" aria-label="Resources">
-		for _, resource := range state.Resources {
-			<button
-				class="flex min-h-9 w-full cursor-pointer items-center gap-2 rounded-[7px] border-0 bg-transparent px-2.5 py-2 text-left text-[var(--side-text)] hover:bg-[var(--side-hover)] hover:text-[var(--side-strong)] [&[aria-pressed=true]]:bg-[var(--side-hover)] [&[aria-pressed=true]]:text-[var(--side-strong)]"
-				type="button"
-				aria-pressed={ checked(state.Signals.Resource, string(resource.Kind)) }
-				{ resourceButtonAttrs(resource)... }
-			>
-				<span class={ "nav-icon " + resourceButtonIconClass(resource.Kind) } aria-hidden="true"></span>
-				<span>{ resource.Label }</span>
-			</button>
+	<nav id="resource-nav" class="resource-nav" aria-label="Resources">
+		for _, group := range resourceNavGroups(state.Resources) {
+			<div class="resource-nav-group" data-resource-group={ group.ID }>
+				<button
+					class="resource-group-button"
+					type="button"
+					aria-pressed={ checkedBool(resourceGroupActive(group, state.Signals.Resource)) }
+					{ resourceButtonAttrs(group.Default)... }
+				>
+					<span class={ "nav-icon " + resourceGroupIconClass(group) } aria-hidden="true"></span>
+					<span>{ group.Label }</span>
+				</button>
+				if len(resourceGroupChildren(group)) > 0 {
+					<div class="resource-nav-children" data-resource-group-children={ group.ID } hidden?={ !resourceGroupActive(group, state.Signals.Resource) }>
+						for _, resource := range resourceGroupChildren(group) {
+							<button
+								class="resource-child-button"
+								type="button"
+								aria-pressed={ checked(state.Signals.Resource, string(resource.Kind)) }
+								{ resourceButtonAttrs(resource)... }
+							>
+								<span>{ resource.Label }</span>
+							</button>
+						}
+					</div>
+				}
+			</div>
 		}
 	</nav>
 }

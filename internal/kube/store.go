@@ -9,17 +9,37 @@ import (
 	"sync/atomic"
 	"time"
 
+	admissionv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
+	batchv1 "k8s.io/api/batch/v1"
+	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	nodev1 "k8s.io/api/node/v1"
+	policyv1 "k8s.io/api/policy/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
+	schedulingv1 "k8s.io/api/scheduling/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/version"
 	"k8s.io/client-go/informers"
+	admissionlisters "k8s.io/client-go/listers/admissionregistration/v1"
 	appslisters "k8s.io/client-go/listers/apps/v1"
+	autoscalinglisters "k8s.io/client-go/listers/autoscaling/v2"
+	batchlisters "k8s.io/client-go/listers/batch/v1"
+	coordinationlisters "k8s.io/client-go/listers/coordination/v1"
 	corelisters "k8s.io/client-go/listers/core/v1"
+	discoverylisters "k8s.io/client-go/listers/discovery/v1"
 	networkinglisters "k8s.io/client-go/listers/networking/v1"
+	nodelisters "k8s.io/client-go/listers/node/v1"
+	policylisters "k8s.io/client-go/listers/policy/v1"
+	rbaclisters "k8s.io/client-go/listers/rbac/v1"
+	schedulinglisters "k8s.io/client-go/listers/scheduling/v1"
+	storagelisters "k8s.io/client-go/listers/storage/v1"
 	"k8s.io/client-go/tools/cache"
 	metricsclient "k8s.io/metrics/pkg/client/clientset/versioned"
 )
@@ -43,15 +63,41 @@ type ResourceStore struct {
 	metricsState    MetricsState
 	podUsageHistory map[string][]UsageSample
 
-	pods         corelisters.PodLister
-	events       corelisters.EventLister
-	services     corelisters.ServiceLister
-	nodes        corelisters.NodeLister
-	namespaces   corelisters.NamespaceLister
-	deployments  appslisters.DeploymentLister
-	statefulSets appslisters.StatefulSetLister
-	daemonSets   appslisters.DaemonSetLister
-	ingresses    networkinglisters.IngressLister
+	pods                            corelisters.PodLister
+	events                          corelisters.EventLister
+	services                        corelisters.ServiceLister
+	endpoints                       corelisters.EndpointsLister
+	nodes                           corelisters.NodeLister
+	namespaces                      corelisters.NamespaceLister
+	persistentVolumeClaims          corelisters.PersistentVolumeClaimLister
+	persistentVolumes               corelisters.PersistentVolumeLister
+	serviceAccounts                 corelisters.ServiceAccountLister
+	configMaps                      corelisters.ConfigMapLister
+	secrets                         corelisters.SecretLister
+	resourceQuotas                  corelisters.ResourceQuotaLister
+	limitRanges                     corelisters.LimitRangeLister
+	deployments                     appslisters.DeploymentLister
+	statefulSets                    appslisters.StatefulSetLister
+	daemonSets                      appslisters.DaemonSetLister
+	replicaSets                     appslisters.ReplicaSetLister
+	jobs                            batchlisters.JobLister
+	cronJobs                        batchlisters.CronJobLister
+	ingresses                       networkinglisters.IngressLister
+	ingressClasses                  networkinglisters.IngressClassLister
+	networkPolicies                 networkinglisters.NetworkPolicyLister
+	endpointSlices                  discoverylisters.EndpointSliceLister
+	storageClasses                  storagelisters.StorageClassLister
+	roles                           rbaclisters.RoleLister
+	roleBindings                    rbaclisters.RoleBindingLister
+	clusterRoles                    rbaclisters.ClusterRoleLister
+	clusterRoleBindings             rbaclisters.ClusterRoleBindingLister
+	horizontalPodAutoscalers        autoscalinglisters.HorizontalPodAutoscalerLister
+	podDisruptionBudgets            policylisters.PodDisruptionBudgetLister
+	priorityClasses                 schedulinglisters.PriorityClassLister
+	runtimeClasses                  nodelisters.RuntimeClassLister
+	leases                          coordinationlisters.LeaseLister
+	mutatingWebhookConfigurations   admissionlisters.MutatingWebhookConfigurationLister
+	validatingWebhookConfigurations admissionlisters.ValidatingWebhookConfigurationLister
 }
 
 func NewResourceStore(cluster *Cluster, logger *slog.Logger) *ResourceStore {
@@ -79,33 +125,111 @@ func NewResourceStore(cluster *Cluster, logger *slog.Logger) *ResourceStore {
 	pods := store.factory.Core().V1().Pods()
 	events := store.factory.Core().V1().Events()
 	services := store.factory.Core().V1().Services()
+	endpoints := store.factory.Core().V1().Endpoints()
 	nodes := store.factory.Core().V1().Nodes()
 	namespaces := store.factory.Core().V1().Namespaces()
+	persistentVolumeClaims := store.factory.Core().V1().PersistentVolumeClaims()
+	persistentVolumes := store.factory.Core().V1().PersistentVolumes()
+	serviceAccounts := store.factory.Core().V1().ServiceAccounts()
+	configMaps := store.factory.Core().V1().ConfigMaps()
+	secrets := store.factory.Core().V1().Secrets()
+	resourceQuotas := store.factory.Core().V1().ResourceQuotas()
+	limitRanges := store.factory.Core().V1().LimitRanges()
 	deployments := store.factory.Apps().V1().Deployments()
 	statefulSets := store.factory.Apps().V1().StatefulSets()
 	daemonSets := store.factory.Apps().V1().DaemonSets()
+	replicaSets := store.factory.Apps().V1().ReplicaSets()
+	jobs := store.factory.Batch().V1().Jobs()
+	cronJobs := store.factory.Batch().V1().CronJobs()
 	ingresses := store.factory.Networking().V1().Ingresses()
+	ingressClasses := store.factory.Networking().V1().IngressClasses()
+	networkPolicies := store.factory.Networking().V1().NetworkPolicies()
+	endpointSlices := store.factory.Discovery().V1().EndpointSlices()
+	storageClasses := store.factory.Storage().V1().StorageClasses()
+	roles := store.factory.Rbac().V1().Roles()
+	roleBindings := store.factory.Rbac().V1().RoleBindings()
+	clusterRoles := store.factory.Rbac().V1().ClusterRoles()
+	clusterRoleBindings := store.factory.Rbac().V1().ClusterRoleBindings()
+	horizontalPodAutoscalers := store.factory.Autoscaling().V2().HorizontalPodAutoscalers()
+	podDisruptionBudgets := store.factory.Policy().V1().PodDisruptionBudgets()
+	priorityClasses := store.factory.Scheduling().V1().PriorityClasses()
+	runtimeClasses := store.factory.Node().V1().RuntimeClasses()
+	leases := store.factory.Coordination().V1().Leases()
+	mutatingWebhookConfigurations := store.factory.Admissionregistration().V1().MutatingWebhookConfigurations()
+	validatingWebhookConfigurations := store.factory.Admissionregistration().V1().ValidatingWebhookConfigurations()
 
 	store.pods = pods.Lister()
 	store.events = events.Lister()
 	store.services = services.Lister()
+	store.endpoints = endpoints.Lister()
 	store.nodes = nodes.Lister()
 	store.namespaces = namespaces.Lister()
+	store.persistentVolumeClaims = persistentVolumeClaims.Lister()
+	store.persistentVolumes = persistentVolumes.Lister()
+	store.serviceAccounts = serviceAccounts.Lister()
+	store.configMaps = configMaps.Lister()
+	store.secrets = secrets.Lister()
+	store.resourceQuotas = resourceQuotas.Lister()
+	store.limitRanges = limitRanges.Lister()
 	store.deployments = deployments.Lister()
 	store.statefulSets = statefulSets.Lister()
 	store.daemonSets = daemonSets.Lister()
+	store.replicaSets = replicaSets.Lister()
+	store.jobs = jobs.Lister()
+	store.cronJobs = cronJobs.Lister()
 	store.ingresses = ingresses.Lister()
+	store.ingressClasses = ingressClasses.Lister()
+	store.networkPolicies = networkPolicies.Lister()
+	store.endpointSlices = endpointSlices.Lister()
+	store.storageClasses = storageClasses.Lister()
+	store.roles = roles.Lister()
+	store.roleBindings = roleBindings.Lister()
+	store.clusterRoles = clusterRoles.Lister()
+	store.clusterRoleBindings = clusterRoleBindings.Lister()
+	store.horizontalPodAutoscalers = horizontalPodAutoscalers.Lister()
+	store.podDisruptionBudgets = podDisruptionBudgets.Lister()
+	store.priorityClasses = priorityClasses.Lister()
+	store.runtimeClasses = runtimeClasses.Lister()
+	store.leases = leases.Lister()
+	store.mutatingWebhookConfigurations = mutatingWebhookConfigurations.Lister()
+	store.validatingWebhookConfigurations = validatingWebhookConfigurations.Lister()
 
 	store.synced = []cache.InformerSynced{
 		pods.Informer().HasSynced,
 		events.Informer().HasSynced,
 		services.Informer().HasSynced,
+		endpoints.Informer().HasSynced,
 		nodes.Informer().HasSynced,
 		namespaces.Informer().HasSynced,
+		persistentVolumeClaims.Informer().HasSynced,
+		persistentVolumes.Informer().HasSynced,
+		serviceAccounts.Informer().HasSynced,
+		configMaps.Informer().HasSynced,
+		secrets.Informer().HasSynced,
+		resourceQuotas.Informer().HasSynced,
+		limitRanges.Informer().HasSynced,
 		deployments.Informer().HasSynced,
 		statefulSets.Informer().HasSynced,
 		daemonSets.Informer().HasSynced,
+		replicaSets.Informer().HasSynced,
+		jobs.Informer().HasSynced,
+		cronJobs.Informer().HasSynced,
 		ingresses.Informer().HasSynced,
+		ingressClasses.Informer().HasSynced,
+		networkPolicies.Informer().HasSynced,
+		endpointSlices.Informer().HasSynced,
+		storageClasses.Informer().HasSynced,
+		roles.Informer().HasSynced,
+		roleBindings.Informer().HasSynced,
+		clusterRoles.Informer().HasSynced,
+		clusterRoleBindings.Informer().HasSynced,
+		horizontalPodAutoscalers.Informer().HasSynced,
+		podDisruptionBudgets.Informer().HasSynced,
+		priorityClasses.Informer().HasSynced,
+		runtimeClasses.Informer().HasSynced,
+		leases.Informer().HasSynced,
+		mutatingWebhookConfigurations.Informer().HasSynced,
+		validatingWebhookConfigurations.Informer().HasSynced,
 	}
 
 	return store
@@ -255,6 +379,54 @@ func (s *ResourceStore) TableWithSort(kind ResourceKind, namespace, query, sortC
 				table.Rows = append(table.Rows, row)
 			}
 		}
+	case KindReplicaSets:
+		table.Columns = []string{"Name", "Namespace", "Desired", "Current", "Ready", "Age"}
+		for _, replicaSet := range s.listReplicaSets(namespace) {
+			row := replicaSetRow(*replicaSet)
+			if matches(row, query) {
+				table.Rows = append(table.Rows, row)
+			}
+		}
+	case KindJobs:
+		table.Columns = []string{"Name", "Namespace", "Completions", "Succeeded", "Failed", "Age"}
+		for _, job := range s.listJobs(namespace) {
+			row := jobRow(*job)
+			if matches(row, query) {
+				table.Rows = append(table.Rows, row)
+			}
+		}
+	case KindCronJobs:
+		table.Columns = []string{"Name", "Namespace", "Schedule", "Suspend", "Active", "Last Schedule", "Age"}
+		for _, cronJob := range s.listCronJobs(namespace) {
+			row := cronJobRow(*cronJob)
+			if matches(row, query) {
+				table.Rows = append(table.Rows, row)
+			}
+		}
+	case KindPersistentVolumeClaims:
+		table.Columns = []string{"Name", "Namespace", "Status", "Volume", "Capacity", "StorageClass", "Age"}
+		for _, pvc := range s.listPersistentVolumeClaims(namespace) {
+			row := persistentVolumeClaimRow(*pvc)
+			if matches(row, query) {
+				table.Rows = append(table.Rows, row)
+			}
+		}
+	case KindPersistentVolumes:
+		table.Columns = []string{"Name", "Status", "Capacity", "Access Modes", "Reclaim Policy", "StorageClass", "Claim", "Age"}
+		for _, pv := range s.listPersistentVolumes() {
+			row := persistentVolumeRow(*pv)
+			if matches(row, query) {
+				table.Rows = append(table.Rows, row)
+			}
+		}
+	case KindStorageClasses:
+		table.Columns = []string{"Name", "Provisioner", "Reclaim Policy", "Binding Mode", "Default", "Age"}
+		for _, storageClass := range s.listStorageClasses() {
+			row := storageClassRow(*storageClass)
+			if matches(row, query) {
+				table.Rows = append(table.Rows, row)
+			}
+		}
 	case KindServices:
 		table.Columns = []string{"Name", "Namespace", "Type", "Cluster IP", "Ports", "Age"}
 		for _, service := range s.listServices(namespace) {
@@ -263,10 +435,170 @@ func (s *ResourceStore) TableWithSort(kind ResourceKind, namespace, query, sortC
 				table.Rows = append(table.Rows, row)
 			}
 		}
+	case KindEndpoints:
+		table.Columns = []string{"Name", "Namespace", "Addresses", "Not Ready", "Ports", "Age"}
+		for _, endpoint := range s.listEndpoints(namespace) {
+			row := endpointsRow(*endpoint)
+			if matches(row, query) {
+				table.Rows = append(table.Rows, row)
+			}
+		}
+	case KindEndpointSlices:
+		table.Columns = []string{"Name", "Namespace", "Address Type", "Endpoints", "Ports", "Age"}
+		for _, endpointSlice := range s.listEndpointSlices(namespace) {
+			row := endpointSliceRow(*endpointSlice)
+			if matches(row, query) {
+				table.Rows = append(table.Rows, row)
+			}
+		}
 	case KindIngresses:
 		table.Columns = []string{"Name", "Namespace", "Class", "Hosts", "Address", "Age"}
 		for _, ingress := range s.listIngresses(namespace) {
 			row := ingressRow(*ingress)
+			if matches(row, query) {
+				table.Rows = append(table.Rows, row)
+			}
+		}
+	case KindIngressClasses:
+		table.Columns = []string{"Name", "Controller", "Default", "Age"}
+		for _, ingressClass := range s.listIngressClasses() {
+			row := ingressClassRow(*ingressClass)
+			if matches(row, query) {
+				table.Rows = append(table.Rows, row)
+			}
+		}
+	case KindNetworkPolicies:
+		table.Columns = []string{"Name", "Namespace", "Pod Selector", "Policy Types", "Age"}
+		for _, policy := range s.listNetworkPolicies(namespace) {
+			row := networkPolicyRow(*policy)
+			if matches(row, query) {
+				table.Rows = append(table.Rows, row)
+			}
+		}
+	case KindServiceAccounts:
+		table.Columns = []string{"Name", "Namespace", "Secrets", "Image Pull Secrets", "Age"}
+		for _, account := range s.listServiceAccounts(namespace) {
+			row := serviceAccountRow(*account)
+			if matches(row, query) {
+				table.Rows = append(table.Rows, row)
+			}
+		}
+	case KindRoles:
+		table.Columns = []string{"Name", "Namespace", "Rules", "Age"}
+		for _, role := range s.listRoles(namespace) {
+			row := roleRow(*role)
+			if matches(row, query) {
+				table.Rows = append(table.Rows, row)
+			}
+		}
+	case KindRoleBindings:
+		table.Columns = []string{"Name", "Namespace", "Role", "Subjects", "Age"}
+		for _, binding := range s.listRoleBindings(namespace) {
+			row := roleBindingRow(*binding)
+			if matches(row, query) {
+				table.Rows = append(table.Rows, row)
+			}
+		}
+	case KindClusterRoles:
+		table.Columns = []string{"Name", "Rules", "Age"}
+		for _, role := range s.listClusterRoles() {
+			row := clusterRoleRow(*role)
+			if matches(row, query) {
+				table.Rows = append(table.Rows, row)
+			}
+		}
+	case KindClusterRoleBindings:
+		table.Columns = []string{"Name", "Role", "Subjects", "Age"}
+		for _, binding := range s.listClusterRoleBindings() {
+			row := clusterRoleBindingRow(*binding)
+			if matches(row, query) {
+				table.Rows = append(table.Rows, row)
+			}
+		}
+	case KindConfigMaps:
+		table.Columns = []string{"Name", "Namespace", "Data", "Age"}
+		for _, configMap := range s.listConfigMaps(namespace) {
+			row := configMapRow(*configMap)
+			if matches(row, query) {
+				table.Rows = append(table.Rows, row)
+			}
+		}
+	case KindSecrets:
+		table.Columns = []string{"Name", "Namespace", "Type", "Data", "Age"}
+		for _, secret := range s.listSecrets(namespace) {
+			row := secretRow(*secret)
+			if matches(row, query) {
+				table.Rows = append(table.Rows, row)
+			}
+		}
+	case KindHorizontalPodAutoscalers:
+		table.Columns = []string{"Name", "Namespace", "Reference", "Min", "Max", "Replicas", "Age"}
+		for _, hpa := range s.listHorizontalPodAutoscalers(namespace) {
+			row := horizontalPodAutoscalerRow(*hpa)
+			if matches(row, query) {
+				table.Rows = append(table.Rows, row)
+			}
+		}
+	case KindPodDisruptionBudgets:
+		table.Columns = []string{"Name", "Namespace", "Min Available", "Max Unavailable", "Allowed", "Age"}
+		for _, pdb := range s.listPodDisruptionBudgets(namespace) {
+			row := podDisruptionBudgetRow(*pdb)
+			if matches(row, query) {
+				table.Rows = append(table.Rows, row)
+			}
+		}
+	case KindResourceQuotas:
+		table.Columns = []string{"Name", "Namespace", "Hard", "Used", "Age"}
+		for _, quota := range s.listResourceQuotas(namespace) {
+			row := resourceQuotaRow(*quota)
+			if matches(row, query) {
+				table.Rows = append(table.Rows, row)
+			}
+		}
+	case KindLimitRanges:
+		table.Columns = []string{"Name", "Namespace", "Limits", "Age"}
+		for _, limitRange := range s.listLimitRanges(namespace) {
+			row := limitRangeRow(*limitRange)
+			if matches(row, query) {
+				table.Rows = append(table.Rows, row)
+			}
+		}
+	case KindPriorityClasses:
+		table.Columns = []string{"Name", "Value", "Global Default", "Preemption", "Age"}
+		for _, priorityClass := range s.listPriorityClasses() {
+			row := priorityClassRow(*priorityClass)
+			if matches(row, query) {
+				table.Rows = append(table.Rows, row)
+			}
+		}
+	case KindRuntimeClasses:
+		table.Columns = []string{"Name", "Handler", "Age"}
+		for _, runtimeClass := range s.listRuntimeClasses() {
+			row := runtimeClassRow(*runtimeClass)
+			if matches(row, query) {
+				table.Rows = append(table.Rows, row)
+			}
+		}
+	case KindLeases:
+		table.Columns = []string{"Name", "Namespace", "Holder", "Renew Time", "Age"}
+		for _, lease := range s.listLeases(namespace) {
+			row := leaseRow(*lease)
+			if matches(row, query) {
+				table.Rows = append(table.Rows, row)
+			}
+		}
+	case KindMutatingWebhookConfigurations:
+		table.Columns = []string{"Name", "Webhooks", "Age"}
+		for _, config := range s.listMutatingWebhookConfigurations() {
+			row := mutatingWebhookConfigurationRow(*config)
+			if matches(row, query) {
+				table.Rows = append(table.Rows, row)
+			}
+		}
+	case KindValidatingWebhookConfigurations:
+		table.Columns = []string{"Name", "Webhooks", "Age"}
+		for _, config := range s.listValidatingWebhookConfigurations() {
+			row := validatingWebhookConfigurationRow(*config)
 			if matches(row, query) {
 				table.Rows = append(table.Rows, row)
 			}
@@ -283,6 +615,14 @@ func (s *ResourceStore) TableWithSort(kind ResourceKind, namespace, query, sortC
 		table.Columns = []string{"Name", "Status", "Age"}
 		for _, namespace := range s.listNamespaces() {
 			row := namespaceRow(*namespace)
+			if matches(row, query) {
+				table.Rows = append(table.Rows, row)
+			}
+		}
+	case KindEvents:
+		table.Columns = []string{"Name", "Namespace", "Type", "Reason", "Object", "Message", "Age"}
+		for _, event := range s.listEventsForNamespace(namespace) {
+			row := eventRow(*event)
 			if matches(row, query) {
 				table.Rows = append(table.Rows, row)
 			}
@@ -583,12 +923,29 @@ func (s *ResourceStore) listEvents() []*corev1.Event {
 	return items
 }
 
+func (s *ResourceStore) listEventsForNamespace(namespace string) []*corev1.Event {
+	if namespace != "" {
+		items, _ := s.events.Events(namespace).List(labels.Everything())
+		return items
+	}
+	return s.listEvents()
+}
+
 func (s *ResourceStore) listServices(namespace string) []*corev1.Service {
 	if namespace != "" {
 		items, _ := s.services.Services(namespace).List(labels.Everything())
 		return items
 	}
 	items, _ := s.services.List(labels.Everything())
+	return items
+}
+
+func (s *ResourceStore) listEndpoints(namespace string) []*corev1.Endpoints {
+	if namespace != "" {
+		items, _ := s.endpoints.Endpoints(namespace).List(labels.Everything())
+		return items
+	}
+	items, _ := s.endpoints.List(labels.Everything())
 	return items
 }
 
@@ -599,6 +956,65 @@ func (s *ResourceStore) listNodes() []*corev1.Node {
 
 func (s *ResourceStore) listNamespaces() []*corev1.Namespace {
 	items, _ := s.namespaces.List(labels.Everything())
+	return items
+}
+
+func (s *ResourceStore) listPersistentVolumeClaims(namespace string) []*corev1.PersistentVolumeClaim {
+	if namespace != "" {
+		items, _ := s.persistentVolumeClaims.PersistentVolumeClaims(namespace).List(labels.Everything())
+		return items
+	}
+	items, _ := s.persistentVolumeClaims.List(labels.Everything())
+	return items
+}
+
+func (s *ResourceStore) listPersistentVolumes() []*corev1.PersistentVolume {
+	items, _ := s.persistentVolumes.List(labels.Everything())
+	return items
+}
+
+func (s *ResourceStore) listServiceAccounts(namespace string) []*corev1.ServiceAccount {
+	if namespace != "" {
+		items, _ := s.serviceAccounts.ServiceAccounts(namespace).List(labels.Everything())
+		return items
+	}
+	items, _ := s.serviceAccounts.List(labels.Everything())
+	return items
+}
+
+func (s *ResourceStore) listConfigMaps(namespace string) []*corev1.ConfigMap {
+	if namespace != "" {
+		items, _ := s.configMaps.ConfigMaps(namespace).List(labels.Everything())
+		return items
+	}
+	items, _ := s.configMaps.List(labels.Everything())
+	return items
+}
+
+func (s *ResourceStore) listSecrets(namespace string) []*corev1.Secret {
+	if namespace != "" {
+		items, _ := s.secrets.Secrets(namespace).List(labels.Everything())
+		return items
+	}
+	items, _ := s.secrets.List(labels.Everything())
+	return items
+}
+
+func (s *ResourceStore) listResourceQuotas(namespace string) []*corev1.ResourceQuota {
+	if namespace != "" {
+		items, _ := s.resourceQuotas.ResourceQuotas(namespace).List(labels.Everything())
+		return items
+	}
+	items, _ := s.resourceQuotas.List(labels.Everything())
+	return items
+}
+
+func (s *ResourceStore) listLimitRanges(namespace string) []*corev1.LimitRange {
+	if namespace != "" {
+		items, _ := s.limitRanges.LimitRanges(namespace).List(labels.Everything())
+		return items
+	}
+	items, _ := s.limitRanges.List(labels.Everything())
 	return items
 }
 
@@ -629,11 +1045,141 @@ func (s *ResourceStore) listDaemonSets(namespace string) []*appsv1.DaemonSet {
 	return items
 }
 
+func (s *ResourceStore) listReplicaSets(namespace string) []*appsv1.ReplicaSet {
+	if namespace != "" {
+		items, _ := s.replicaSets.ReplicaSets(namespace).List(labels.Everything())
+		return items
+	}
+	items, _ := s.replicaSets.List(labels.Everything())
+	return items
+}
+
+func (s *ResourceStore) listJobs(namespace string) []*batchv1.Job {
+	if namespace != "" {
+		items, _ := s.jobs.Jobs(namespace).List(labels.Everything())
+		return items
+	}
+	items, _ := s.jobs.List(labels.Everything())
+	return items
+}
+
+func (s *ResourceStore) listCronJobs(namespace string) []*batchv1.CronJob {
+	if namespace != "" {
+		items, _ := s.cronJobs.CronJobs(namespace).List(labels.Everything())
+		return items
+	}
+	items, _ := s.cronJobs.List(labels.Everything())
+	return items
+}
+
 func (s *ResourceStore) listIngresses(namespace string) []*networkingv1.Ingress {
 	if namespace != "" {
 		items, _ := s.ingresses.Ingresses(namespace).List(labels.Everything())
 		return items
 	}
 	items, _ := s.ingresses.List(labels.Everything())
+	return items
+}
+
+func (s *ResourceStore) listIngressClasses() []*networkingv1.IngressClass {
+	items, _ := s.ingressClasses.List(labels.Everything())
+	return items
+}
+
+func (s *ResourceStore) listNetworkPolicies(namespace string) []*networkingv1.NetworkPolicy {
+	if namespace != "" {
+		items, _ := s.networkPolicies.NetworkPolicies(namespace).List(labels.Everything())
+		return items
+	}
+	items, _ := s.networkPolicies.List(labels.Everything())
+	return items
+}
+
+func (s *ResourceStore) listEndpointSlices(namespace string) []*discoveryv1.EndpointSlice {
+	if namespace != "" {
+		items, _ := s.endpointSlices.EndpointSlices(namespace).List(labels.Everything())
+		return items
+	}
+	items, _ := s.endpointSlices.List(labels.Everything())
+	return items
+}
+
+func (s *ResourceStore) listStorageClasses() []*storagev1.StorageClass {
+	items, _ := s.storageClasses.List(labels.Everything())
+	return items
+}
+
+func (s *ResourceStore) listRoles(namespace string) []*rbacv1.Role {
+	if namespace != "" {
+		items, _ := s.roles.Roles(namespace).List(labels.Everything())
+		return items
+	}
+	items, _ := s.roles.List(labels.Everything())
+	return items
+}
+
+func (s *ResourceStore) listRoleBindings(namespace string) []*rbacv1.RoleBinding {
+	if namespace != "" {
+		items, _ := s.roleBindings.RoleBindings(namespace).List(labels.Everything())
+		return items
+	}
+	items, _ := s.roleBindings.List(labels.Everything())
+	return items
+}
+
+func (s *ResourceStore) listClusterRoles() []*rbacv1.ClusterRole {
+	items, _ := s.clusterRoles.List(labels.Everything())
+	return items
+}
+
+func (s *ResourceStore) listClusterRoleBindings() []*rbacv1.ClusterRoleBinding {
+	items, _ := s.clusterRoleBindings.List(labels.Everything())
+	return items
+}
+
+func (s *ResourceStore) listHorizontalPodAutoscalers(namespace string) []*autoscalingv2.HorizontalPodAutoscaler {
+	if namespace != "" {
+		items, _ := s.horizontalPodAutoscalers.HorizontalPodAutoscalers(namespace).List(labels.Everything())
+		return items
+	}
+	items, _ := s.horizontalPodAutoscalers.List(labels.Everything())
+	return items
+}
+
+func (s *ResourceStore) listPodDisruptionBudgets(namespace string) []*policyv1.PodDisruptionBudget {
+	if namespace != "" {
+		items, _ := s.podDisruptionBudgets.PodDisruptionBudgets(namespace).List(labels.Everything())
+		return items
+	}
+	items, _ := s.podDisruptionBudgets.List(labels.Everything())
+	return items
+}
+
+func (s *ResourceStore) listPriorityClasses() []*schedulingv1.PriorityClass {
+	items, _ := s.priorityClasses.List(labels.Everything())
+	return items
+}
+
+func (s *ResourceStore) listRuntimeClasses() []*nodev1.RuntimeClass {
+	items, _ := s.runtimeClasses.List(labels.Everything())
+	return items
+}
+
+func (s *ResourceStore) listLeases(namespace string) []*coordinationv1.Lease {
+	if namespace != "" {
+		items, _ := s.leases.Leases(namespace).List(labels.Everything())
+		return items
+	}
+	items, _ := s.leases.List(labels.Everything())
+	return items
+}
+
+func (s *ResourceStore) listMutatingWebhookConfigurations() []*admissionv1.MutatingWebhookConfiguration {
+	items, _ := s.mutatingWebhookConfigurations.List(labels.Everything())
+	return items
+}
+
+func (s *ResourceStore) listValidatingWebhookConfigurations() []*admissionv1.ValidatingWebhookConfiguration {
+	items, _ := s.validatingWebhookConfigurations.List(labels.Everything())
 	return items
 }

@@ -724,6 +724,34 @@ function nextSortState(column) {
   return { sortColumn: "", sortOrder: "" };
 }
 
+function applyOptimisticResourceNav(resourceButton) {
+  const nav = resourceButton.closest("#resource-nav");
+  const group = resourceButton.closest("[data-resource-group]");
+  const resourceKind = resourceButton.dataset.resourceKind || defaultUrlState.resource;
+  if (!nav || !group) {
+    return;
+  }
+
+  for (const button of nav.querySelectorAll(".resource-group-button, .resource-child-button")) {
+    button.setAttribute("aria-pressed", "false");
+  }
+  for (const children of nav.querySelectorAll("[data-resource-group-children]")) {
+    children.hidden = true;
+  }
+
+  const groupButton = group.querySelector(".resource-group-button");
+  const children = group.querySelector("[data-resource-group-children]");
+  groupButton?.setAttribute("aria-pressed", "true");
+  if (children) {
+    children.hidden = false;
+  }
+  for (const button of nav.querySelectorAll(`[data-resource-kind="${CSS.escape(resourceKind)}"]`)) {
+    if (button.closest("[data-resource-group]") === group) {
+      button.setAttribute("aria-pressed", "true");
+    }
+  }
+}
+
 applyTheme(savedTheme());
 
 document.addEventListener("click", (event) => {
@@ -744,6 +772,7 @@ document.addEventListener("click", (event) => {
 document.addEventListener("click", (event) => {
   const resourceButton = event.target.closest("[data-resource-kind]");
   if (resourceButton) {
+    applyOptimisticResourceNav(resourceButton);
     const patch = {
       resource: resourceButton.dataset.resourceKind || defaultUrlState.resource,
       sortColumn: "",

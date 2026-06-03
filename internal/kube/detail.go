@@ -6,9 +6,19 @@ import (
 	"strings"
 	"time"
 
+	admissionv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
+	batchv1 "k8s.io/api/batch/v1"
+	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	nodev1 "k8s.io/api/node/v1"
+	policyv1 "k8s.io/api/policy/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
+	schedulingv1 "k8s.io/api/scheduling/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/yaml"
 )
@@ -53,6 +63,48 @@ func (s *ResourceStore) Detail(kind ResourceKind, namespace, name string) Resour
 			return detail
 		}
 		return s.withEvents(daemonSetDetail(*daemonSet))
+	case KindReplicaSets:
+		replicaSet, err := s.replicaSets.ReplicaSets(namespace).Get(name)
+		if err != nil {
+			detail.Error = err.Error()
+			return detail
+		}
+		return s.withEvents(replicaSetDetail(*replicaSet))
+	case KindJobs:
+		job, err := s.jobs.Jobs(namespace).Get(name)
+		if err != nil {
+			detail.Error = err.Error()
+			return detail
+		}
+		return s.withEvents(jobDetail(*job))
+	case KindCronJobs:
+		cronJob, err := s.cronJobs.CronJobs(namespace).Get(name)
+		if err != nil {
+			detail.Error = err.Error()
+			return detail
+		}
+		return s.withEvents(cronJobDetail(*cronJob))
+	case KindPersistentVolumeClaims:
+		pvc, err := s.persistentVolumeClaims.PersistentVolumeClaims(namespace).Get(name)
+		if err != nil {
+			detail.Error = err.Error()
+			return detail
+		}
+		return s.withEvents(persistentVolumeClaimDetail(*pvc))
+	case KindPersistentVolumes:
+		pv, err := s.persistentVolumes.Get(name)
+		if err != nil {
+			detail.Error = err.Error()
+			return detail
+		}
+		return s.withEvents(persistentVolumeDetail(*pv))
+	case KindStorageClasses:
+		storageClass, err := s.storageClasses.Get(name)
+		if err != nil {
+			detail.Error = err.Error()
+			return detail
+		}
+		return storageClassDetail(*storageClass)
 	case KindServices:
 		service, err := s.services.Services(namespace).Get(name)
 		if err != nil {
@@ -60,6 +112,20 @@ func (s *ResourceStore) Detail(kind ResourceKind, namespace, name string) Resour
 			return detail
 		}
 		return s.withEvents(serviceDetail(*service))
+	case KindEndpoints:
+		endpoint, err := s.endpoints.Endpoints(namespace).Get(name)
+		if err != nil {
+			detail.Error = err.Error()
+			return detail
+		}
+		return s.withEvents(endpointsDetail(*endpoint))
+	case KindEndpointSlices:
+		endpointSlice, err := s.endpointSlices.EndpointSlices(namespace).Get(name)
+		if err != nil {
+			detail.Error = err.Error()
+			return detail
+		}
+		return s.withEvents(endpointSliceDetail(*endpointSlice))
 	case KindIngresses:
 		ingress, err := s.ingresses.Ingresses(namespace).Get(name)
 		if err != nil {
@@ -67,6 +133,132 @@ func (s *ResourceStore) Detail(kind ResourceKind, namespace, name string) Resour
 			return detail
 		}
 		return s.withEvents(ingressDetail(*ingress))
+	case KindIngressClasses:
+		ingressClass, err := s.ingressClasses.Get(name)
+		if err != nil {
+			detail.Error = err.Error()
+			return detail
+		}
+		return ingressClassDetail(*ingressClass)
+	case KindNetworkPolicies:
+		policy, err := s.networkPolicies.NetworkPolicies(namespace).Get(name)
+		if err != nil {
+			detail.Error = err.Error()
+			return detail
+		}
+		return s.withEvents(networkPolicyDetail(*policy))
+	case KindServiceAccounts:
+		account, err := s.serviceAccounts.ServiceAccounts(namespace).Get(name)
+		if err != nil {
+			detail.Error = err.Error()
+			return detail
+		}
+		return s.withEvents(serviceAccountDetail(*account))
+	case KindRoles:
+		role, err := s.roles.Roles(namespace).Get(name)
+		if err != nil {
+			detail.Error = err.Error()
+			return detail
+		}
+		return roleDetail(*role)
+	case KindRoleBindings:
+		binding, err := s.roleBindings.RoleBindings(namespace).Get(name)
+		if err != nil {
+			detail.Error = err.Error()
+			return detail
+		}
+		return roleBindingDetail(*binding)
+	case KindClusterRoles:
+		role, err := s.clusterRoles.Get(name)
+		if err != nil {
+			detail.Error = err.Error()
+			return detail
+		}
+		return clusterRoleDetail(*role)
+	case KindClusterRoleBindings:
+		binding, err := s.clusterRoleBindings.Get(name)
+		if err != nil {
+			detail.Error = err.Error()
+			return detail
+		}
+		return clusterRoleBindingDetail(*binding)
+	case KindConfigMaps:
+		configMap, err := s.configMaps.ConfigMaps(namespace).Get(name)
+		if err != nil {
+			detail.Error = err.Error()
+			return detail
+		}
+		return s.withEvents(configMapDetail(*configMap))
+	case KindSecrets:
+		secret, err := s.secrets.Secrets(namespace).Get(name)
+		if err != nil {
+			detail.Error = err.Error()
+			return detail
+		}
+		return s.withEvents(secretDetail(*secret))
+	case KindHorizontalPodAutoscalers:
+		hpa, err := s.horizontalPodAutoscalers.HorizontalPodAutoscalers(namespace).Get(name)
+		if err != nil {
+			detail.Error = err.Error()
+			return detail
+		}
+		return s.withEvents(horizontalPodAutoscalerDetail(*hpa))
+	case KindPodDisruptionBudgets:
+		pdb, err := s.podDisruptionBudgets.PodDisruptionBudgets(namespace).Get(name)
+		if err != nil {
+			detail.Error = err.Error()
+			return detail
+		}
+		return s.withEvents(podDisruptionBudgetDetail(*pdb))
+	case KindResourceQuotas:
+		quota, err := s.resourceQuotas.ResourceQuotas(namespace).Get(name)
+		if err != nil {
+			detail.Error = err.Error()
+			return detail
+		}
+		return s.withEvents(resourceQuotaDetail(*quota))
+	case KindLimitRanges:
+		limitRange, err := s.limitRanges.LimitRanges(namespace).Get(name)
+		if err != nil {
+			detail.Error = err.Error()
+			return detail
+		}
+		return s.withEvents(limitRangeDetail(*limitRange))
+	case KindPriorityClasses:
+		priorityClass, err := s.priorityClasses.Get(name)
+		if err != nil {
+			detail.Error = err.Error()
+			return detail
+		}
+		return priorityClassDetail(*priorityClass)
+	case KindRuntimeClasses:
+		runtimeClass, err := s.runtimeClasses.Get(name)
+		if err != nil {
+			detail.Error = err.Error()
+			return detail
+		}
+		return runtimeClassDetail(*runtimeClass)
+	case KindLeases:
+		lease, err := s.leases.Leases(namespace).Get(name)
+		if err != nil {
+			detail.Error = err.Error()
+			return detail
+		}
+		return leaseDetail(*lease)
+	case KindMutatingWebhookConfigurations:
+		config, err := s.mutatingWebhookConfigurations.Get(name)
+		if err != nil {
+			detail.Error = err.Error()
+			return detail
+		}
+		return mutatingWebhookConfigurationDetail(*config)
+	case KindValidatingWebhookConfigurations:
+		config, err := s.validatingWebhookConfigurations.Get(name)
+		if err != nil {
+			detail.Error = err.Error()
+			return detail
+		}
+		return validatingWebhookConfigurationDetail(*config)
 	case KindNodes:
 		node, err := s.nodes.Get(name)
 		if err != nil {
@@ -81,6 +273,13 @@ func (s *ResourceStore) Detail(kind ResourceKind, namespace, name string) Resour
 			return detail
 		}
 		return s.withEvents(namespaceDetail(*namespace))
+	case KindEvents:
+		event, err := s.events.Events(namespace).Get(name)
+		if err != nil {
+			detail.Error = err.Error()
+			return detail
+		}
+		return eventDetail(*event)
 	default:
 		detail.Error = "Unsupported resource kind."
 		return detail
@@ -294,6 +493,333 @@ func namespaceDetail(namespace corev1.Namespace) ResourceDetail {
 	return compactDetail(detail)
 }
 
+func replicaSetDetail(replicaSet appsv1.ReplicaSet) ResourceDetail {
+	yamlReplicaSet := replicaSet
+	yamlReplicaSet.TypeMeta = metav1.TypeMeta{APIVersion: "apps/v1", Kind: "ReplicaSet"}
+	yamlReplicaSet.ManagedFields = nil
+	row := replicaSetRow(replicaSet)
+	detail := detailBase(KindReplicaSets, "ReplicaSets", replicaSet.ObjectMeta, row.Status, row.StatusKey)
+	detail.YAML = resourceYAML(yamlReplicaSet)
+	detail.Fields = detailFields("Namespace", replicaSet.Namespace, "Desired", fmt.Sprint(valueOrZero(replicaSet.Spec.Replicas)), "Current", fmt.Sprint(replicaSet.Status.Replicas), "Ready", fmt.Sprint(replicaSet.Status.ReadyReplicas), "Available", fmt.Sprint(replicaSet.Status.AvailableReplicas))
+	detail.Sections = append(detail.Sections, DetailSection{Title: "Selector", Fields: selectorFields(replicaSet.Spec.Selector)}, ownerSection(replicaSet.OwnerReferences))
+	return compactDetail(detail)
+}
+
+func jobDetail(job batchv1.Job) ResourceDetail {
+	yamlJob := job
+	yamlJob.TypeMeta = metav1.TypeMeta{APIVersion: "batch/v1", Kind: "Job"}
+	yamlJob.ManagedFields = nil
+	row := jobRow(job)
+	detail := detailBase(KindJobs, "Jobs", job.ObjectMeta, row.Status, row.StatusKey)
+	detail.YAML = resourceYAML(yamlJob)
+	detail.Fields = detailFields("Namespace", job.Namespace, "Succeeded", fmt.Sprint(job.Status.Succeeded), "Failed", fmt.Sprint(job.Status.Failed), "Active", fmt.Sprint(job.Status.Active), "Parallelism", fmt.Sprint(valueOrZero(job.Spec.Parallelism)), "Completions", fmt.Sprint(valueOrZero(job.Spec.Completions)))
+	detail.Sections = append(detail.Sections, DetailSection{Title: "Selector", Fields: selectorFields(job.Spec.Selector)}, ownerSection(job.OwnerReferences))
+	return compactDetail(detail)
+}
+
+func cronJobDetail(cronJob batchv1.CronJob) ResourceDetail {
+	yamlCronJob := cronJob
+	yamlCronJob.TypeMeta = metav1.TypeMeta{APIVersion: "batch/v1", Kind: "CronJob"}
+	yamlCronJob.ManagedFields = nil
+	row := cronJobRow(cronJob)
+	lastSchedule := ""
+	if cronJob.Status.LastScheduleTime != nil {
+		lastSchedule = formatDetailTime(cronJob.Status.LastScheduleTime.Time)
+	}
+	detail := detailBase(KindCronJobs, "CronJobs", cronJob.ObjectMeta, row.Status, row.StatusKey)
+	detail.YAML = resourceYAML(yamlCronJob)
+	detail.Fields = detailFields("Namespace", cronJob.Namespace, "Schedule", cronJob.Spec.Schedule, "Suspend", fmt.Sprint(cronJob.Spec.Suspend != nil && *cronJob.Spec.Suspend), "Active Jobs", fmt.Sprint(len(cronJob.Status.Active)), "Last Schedule", lastSchedule)
+	detail.Sections = append(detail.Sections, ownerSection(cronJob.OwnerReferences))
+	return compactDetail(detail)
+}
+
+func persistentVolumeClaimDetail(pvc corev1.PersistentVolumeClaim) ResourceDetail {
+	yamlPVC := pvc
+	yamlPVC.TypeMeta = metav1.TypeMeta{APIVersion: "v1", Kind: "PersistentVolumeClaim"}
+	yamlPVC.ManagedFields = nil
+	row := persistentVolumeClaimRow(pvc)
+	className := ""
+	if pvc.Spec.StorageClassName != nil {
+		className = *pvc.Spec.StorageClassName
+	}
+	detail := detailBase(KindPersistentVolumeClaims, "PersistentVolumeClaims", pvc.ObjectMeta, row.Status, row.StatusKey)
+	detail.YAML = resourceYAML(yamlPVC)
+	detail.Fields = detailFields("Namespace", pvc.Namespace, "Phase", string(pvc.Status.Phase), "Volume", pvc.Spec.VolumeName, "StorageClass", className, "Access Modes", accessModes(pvc.Spec.AccessModes))
+	detail.Sections = append(detail.Sections, DetailSection{Title: "Capacity", Fields: resourceListFields(pvc.Status.Capacity)}, DetailSection{Title: "Requested", Fields: resourceListFields(pvc.Spec.Resources.Requests)}, ownerSection(pvc.OwnerReferences))
+	return compactDetail(detail)
+}
+
+func persistentVolumeDetail(pv corev1.PersistentVolume) ResourceDetail {
+	yamlPV := pv
+	yamlPV.TypeMeta = metav1.TypeMeta{APIVersion: "v1", Kind: "PersistentVolume"}
+	yamlPV.ManagedFields = nil
+	row := persistentVolumeRow(pv)
+	claim := ""
+	if pv.Spec.ClaimRef != nil {
+		claim = namespacedName(pv.Spec.ClaimRef.Namespace, pv.Spec.ClaimRef.Name)
+	}
+	detail := detailBase(KindPersistentVolumes, "PersistentVolumes", pv.ObjectMeta, row.Status, row.StatusKey)
+	detail.YAML = resourceYAML(yamlPV)
+	detail.Fields = detailFields("Phase", string(pv.Status.Phase), "StorageClass", pv.Spec.StorageClassName, "Access Modes", accessModes(pv.Spec.AccessModes), "Reclaim Policy", string(pv.Spec.PersistentVolumeReclaimPolicy), "Claim", claim)
+	detail.Sections = append(detail.Sections, DetailSection{Title: "Capacity", Fields: resourceListFields(pv.Spec.Capacity)}, ownerSection(pv.OwnerReferences))
+	return compactDetail(detail)
+}
+
+func storageClassDetail(storageClass storagev1.StorageClass) ResourceDetail {
+	yamlStorageClass := storageClass
+	yamlStorageClass.TypeMeta = metav1.TypeMeta{APIVersion: "storage.k8s.io/v1", Kind: "StorageClass"}
+	yamlStorageClass.ManagedFields = nil
+	row := storageClassRow(storageClass)
+	detail := detailBase(KindStorageClasses, "StorageClasses", storageClass.ObjectMeta, row.Status, row.StatusKey)
+	detail.YAML = resourceYAML(yamlStorageClass)
+	detail.Fields = detailFields("Provisioner", storageClass.Provisioner, "Default", fmt.Sprint(isDefaultStorageClass(storageClass.Annotations)), "Parameters", fmt.Sprint(len(storageClass.Parameters)))
+	detail.Sections = append(detail.Sections, DetailSection{Title: "Parameters", Fields: mapFields(storageClass.Parameters)})
+	return compactDetail(detail)
+}
+
+func endpointsDetail(endpoint corev1.Endpoints) ResourceDetail {
+	yamlEndpoint := endpoint
+	yamlEndpoint.TypeMeta = metav1.TypeMeta{APIVersion: "v1", Kind: "Endpoints"}
+	yamlEndpoint.ManagedFields = nil
+	row := endpointsRow(endpoint)
+	detail := detailBase(KindEndpoints, "Endpoints", endpoint.ObjectMeta, row.Status, row.StatusKey)
+	detail.YAML = resourceYAML(yamlEndpoint)
+	detail.Fields = detailFields("Namespace", endpoint.Namespace, "Addresses", row.Cells[2].Value, "Not Ready", row.Cells[3].Value, "Ports", row.Cells[4].Value)
+	detail.Sections = append(detail.Sections, ownerSection(endpoint.OwnerReferences))
+	return compactDetail(detail)
+}
+
+func endpointSliceDetail(endpointSlice discoveryv1.EndpointSlice) ResourceDetail {
+	yamlEndpointSlice := endpointSlice
+	yamlEndpointSlice.TypeMeta = metav1.TypeMeta{APIVersion: "discovery.k8s.io/v1", Kind: "EndpointSlice"}
+	yamlEndpointSlice.ManagedFields = nil
+	row := endpointSliceRow(endpointSlice)
+	detail := detailBase(KindEndpointSlices, "EndpointSlices", endpointSlice.ObjectMeta, row.Status, row.StatusKey)
+	detail.YAML = resourceYAML(yamlEndpointSlice)
+	detail.Fields = detailFields("Namespace", endpointSlice.Namespace, "Address Type", string(endpointSlice.AddressType), "Endpoints", fmt.Sprint(len(endpointSlice.Endpoints)), "Ports", row.Cells[4].Value)
+	detail.Sections = append(detail.Sections, ownerSection(endpointSlice.OwnerReferences))
+	return compactDetail(detail)
+}
+
+func ingressClassDetail(ingressClass networkingv1.IngressClass) ResourceDetail {
+	yamlIngressClass := ingressClass
+	yamlIngressClass.TypeMeta = metav1.TypeMeta{APIVersion: "networking.k8s.io/v1", Kind: "IngressClass"}
+	yamlIngressClass.ManagedFields = nil
+	row := ingressClassRow(ingressClass)
+	detail := detailBase(KindIngressClasses, "IngressClasses", ingressClass.ObjectMeta, row.Status, row.StatusKey)
+	detail.YAML = resourceYAML(yamlIngressClass)
+	detail.Fields = detailFields("Controller", ingressClass.Spec.Controller, "Default", row.Cells[2].Value)
+	return compactDetail(detail)
+}
+
+func networkPolicyDetail(policy networkingv1.NetworkPolicy) ResourceDetail {
+	yamlPolicy := policy
+	yamlPolicy.TypeMeta = metav1.TypeMeta{APIVersion: "networking.k8s.io/v1", Kind: "NetworkPolicy"}
+	yamlPolicy.ManagedFields = nil
+	row := networkPolicyRow(policy)
+	detail := detailBase(KindNetworkPolicies, "NetworkPolicies", policy.ObjectMeta, row.Status, row.StatusKey)
+	detail.YAML = resourceYAML(yamlPolicy)
+	detail.Fields = detailFields("Namespace", policy.Namespace, "Pod Selector", labelSelectorString(&policy.Spec.PodSelector), "Policy Types", networkPolicyTypes(policy.Spec.PolicyTypes), "Ingress Rules", fmt.Sprint(len(policy.Spec.Ingress)), "Egress Rules", fmt.Sprint(len(policy.Spec.Egress)))
+	detail.Sections = append(detail.Sections, ownerSection(policy.OwnerReferences))
+	return compactDetail(detail)
+}
+
+func serviceAccountDetail(account corev1.ServiceAccount) ResourceDetail {
+	yamlAccount := account
+	yamlAccount.TypeMeta = metav1.TypeMeta{APIVersion: "v1", Kind: "ServiceAccount"}
+	yamlAccount.ManagedFields = nil
+	row := serviceAccountRow(account)
+	detail := detailBase(KindServiceAccounts, "ServiceAccounts", account.ObjectMeta, row.Status, row.StatusKey)
+	detail.YAML = resourceYAML(yamlAccount)
+	detail.Fields = detailFields("Namespace", account.Namespace, "Secrets", fmt.Sprint(len(account.Secrets)), "Image Pull Secrets", fmt.Sprint(len(account.ImagePullSecrets)), "Automount Token", boolPtrValue(account.AutomountServiceAccountToken))
+	detail.Sections = append(detail.Sections, ownerSection(account.OwnerReferences))
+	return compactDetail(detail)
+}
+
+func roleDetail(role rbacv1.Role) ResourceDetail {
+	yamlRole := role
+	yamlRole.TypeMeta = metav1.TypeMeta{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "Role"}
+	yamlRole.ManagedFields = nil
+	row := roleRow(role)
+	detail := detailBase(KindRoles, "Roles", role.ObjectMeta, row.Status, row.StatusKey)
+	detail.YAML = resourceYAML(yamlRole)
+	detail.Fields = detailFields("Namespace", role.Namespace, "Rules", fmt.Sprint(len(role.Rules)))
+	return compactDetail(detail)
+}
+
+func roleBindingDetail(binding rbacv1.RoleBinding) ResourceDetail {
+	yamlBinding := binding
+	yamlBinding.TypeMeta = metav1.TypeMeta{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "RoleBinding"}
+	yamlBinding.ManagedFields = nil
+	row := roleBindingRow(binding)
+	detail := detailBase(KindRoleBindings, "RoleBindings", binding.ObjectMeta, row.Status, row.StatusKey)
+	detail.YAML = resourceYAML(yamlBinding)
+	detail.Fields = detailFields("Namespace", binding.Namespace, "Role", binding.RoleRef.Kind+"/"+binding.RoleRef.Name, "Subjects", subjectsValue(binding.Subjects))
+	return compactDetail(detail)
+}
+
+func clusterRoleDetail(role rbacv1.ClusterRole) ResourceDetail {
+	yamlRole := role
+	yamlRole.TypeMeta = metav1.TypeMeta{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "ClusterRole"}
+	yamlRole.ManagedFields = nil
+	row := clusterRoleRow(role)
+	detail := detailBase(KindClusterRoles, "ClusterRoles", role.ObjectMeta, row.Status, row.StatusKey)
+	detail.YAML = resourceYAML(yamlRole)
+	detail.Fields = detailFields("Rules", fmt.Sprint(len(role.Rules)))
+	return compactDetail(detail)
+}
+
+func clusterRoleBindingDetail(binding rbacv1.ClusterRoleBinding) ResourceDetail {
+	yamlBinding := binding
+	yamlBinding.TypeMeta = metav1.TypeMeta{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "ClusterRoleBinding"}
+	yamlBinding.ManagedFields = nil
+	row := clusterRoleBindingRow(binding)
+	detail := detailBase(KindClusterRoleBindings, "ClusterRoleBindings", binding.ObjectMeta, row.Status, row.StatusKey)
+	detail.YAML = resourceYAML(yamlBinding)
+	detail.Fields = detailFields("Role", binding.RoleRef.Kind+"/"+binding.RoleRef.Name, "Subjects", subjectsValue(binding.Subjects))
+	return compactDetail(detail)
+}
+
+func configMapDetail(configMap corev1.ConfigMap) ResourceDetail {
+	yamlConfigMap := configMap
+	yamlConfigMap.TypeMeta = metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMap"}
+	yamlConfigMap.ManagedFields = nil
+	row := configMapRow(configMap)
+	detail := detailBase(KindConfigMaps, "ConfigMaps", configMap.ObjectMeta, row.Status, row.StatusKey)
+	detail.YAML = resourceYAML(yamlConfigMap)
+	detail.Fields = detailFields("Namespace", configMap.Namespace, "Data", fmt.Sprint(len(configMap.Data)), "Binary Data", fmt.Sprint(len(configMap.BinaryData)))
+	detail.Sections = append(detail.Sections, ownerSection(configMap.OwnerReferences))
+	return compactDetail(detail)
+}
+
+func secretDetail(secret corev1.Secret) ResourceDetail {
+	yamlSecret := secret
+	yamlSecret.TypeMeta = metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"}
+	yamlSecret.ManagedFields = nil
+	yamlSecret.Data = nil
+	yamlSecret.StringData = nil
+	row := secretRow(secret)
+	detail := detailBase(KindSecrets, "Secrets", secret.ObjectMeta, row.Status, row.StatusKey)
+	detail.YAML = resourceYAML(yamlSecret)
+	detail.Fields = detailFields("Namespace", secret.Namespace, "Type", string(secret.Type), "Data Keys", fmt.Sprint(len(secret.Data)))
+	detail.Sections = append(detail.Sections, ownerSection(secret.OwnerReferences))
+	return compactDetail(detail)
+}
+
+func horizontalPodAutoscalerDetail(hpa autoscalingv2.HorizontalPodAutoscaler) ResourceDetail {
+	yamlHPA := hpa
+	yamlHPA.TypeMeta = metav1.TypeMeta{APIVersion: "autoscaling/v2", Kind: "HorizontalPodAutoscaler"}
+	yamlHPA.ManagedFields = nil
+	row := horizontalPodAutoscalerRow(hpa)
+	detail := detailBase(KindHorizontalPodAutoscalers, "HPAs", hpa.ObjectMeta, row.Status, row.StatusKey)
+	detail.YAML = resourceYAML(yamlHPA)
+	detail.Fields = detailFields("Namespace", hpa.Namespace, "Reference", hpa.Spec.ScaleTargetRef.Kind+"/"+hpa.Spec.ScaleTargetRef.Name, "Min", row.Cells[3].Value, "Max", row.Cells[4].Value, "Current Replicas", fmt.Sprint(hpa.Status.CurrentReplicas))
+	detail.Sections = append(detail.Sections, ownerSection(hpa.OwnerReferences))
+	return compactDetail(detail)
+}
+
+func podDisruptionBudgetDetail(pdb policyv1.PodDisruptionBudget) ResourceDetail {
+	yamlPDB := pdb
+	yamlPDB.TypeMeta = metav1.TypeMeta{APIVersion: "policy/v1", Kind: "PodDisruptionBudget"}
+	yamlPDB.ManagedFields = nil
+	row := podDisruptionBudgetRow(pdb)
+	detail := detailBase(KindPodDisruptionBudgets, "PodDisruptionBudgets", pdb.ObjectMeta, row.Status, row.StatusKey)
+	detail.YAML = resourceYAML(yamlPDB)
+	detail.Fields = detailFields("Namespace", pdb.Namespace, "Min Available", intOrStringValue(pdb.Spec.MinAvailable), "Max Unavailable", intOrStringValue(pdb.Spec.MaxUnavailable), "Disruptions Allowed", fmt.Sprint(pdb.Status.DisruptionsAllowed), "Current Healthy", fmt.Sprint(pdb.Status.CurrentHealthy), "Desired Healthy", fmt.Sprint(pdb.Status.DesiredHealthy))
+	detail.Sections = append(detail.Sections, DetailSection{Title: "Selector", Fields: selectorFields(pdb.Spec.Selector)}, ownerSection(pdb.OwnerReferences))
+	return compactDetail(detail)
+}
+
+func resourceQuotaDetail(quota corev1.ResourceQuota) ResourceDetail {
+	yamlQuota := quota
+	yamlQuota.TypeMeta = metav1.TypeMeta{APIVersion: "v1", Kind: "ResourceQuota"}
+	yamlQuota.ManagedFields = nil
+	row := resourceQuotaRow(quota)
+	detail := detailBase(KindResourceQuotas, "ResourceQuotas", quota.ObjectMeta, row.Status, row.StatusKey)
+	detail.YAML = resourceYAML(yamlQuota)
+	detail.Fields = detailFields("Namespace", quota.Namespace, "Hard", fmt.Sprint(len(quota.Status.Hard)), "Used", fmt.Sprint(len(quota.Status.Used)))
+	detail.Sections = append(detail.Sections, DetailSection{Title: "Hard", Fields: resourceListFields(quota.Status.Hard)}, DetailSection{Title: "Used", Fields: resourceListFields(quota.Status.Used)}, ownerSection(quota.OwnerReferences))
+	return compactDetail(detail)
+}
+
+func limitRangeDetail(limitRange corev1.LimitRange) ResourceDetail {
+	yamlLimitRange := limitRange
+	yamlLimitRange.TypeMeta = metav1.TypeMeta{APIVersion: "v1", Kind: "LimitRange"}
+	yamlLimitRange.ManagedFields = nil
+	row := limitRangeRow(limitRange)
+	detail := detailBase(KindLimitRanges, "LimitRanges", limitRange.ObjectMeta, row.Status, row.StatusKey)
+	detail.YAML = resourceYAML(yamlLimitRange)
+	detail.Fields = detailFields("Namespace", limitRange.Namespace, "Limits", fmt.Sprint(len(limitRange.Spec.Limits)))
+	detail.Sections = append(detail.Sections, ownerSection(limitRange.OwnerReferences))
+	return compactDetail(detail)
+}
+
+func priorityClassDetail(priorityClass schedulingv1.PriorityClass) ResourceDetail {
+	yamlPriorityClass := priorityClass
+	yamlPriorityClass.TypeMeta = metav1.TypeMeta{APIVersion: "scheduling.k8s.io/v1", Kind: "PriorityClass"}
+	yamlPriorityClass.ManagedFields = nil
+	row := priorityClassRow(priorityClass)
+	detail := detailBase(KindPriorityClasses, "PriorityClasses", priorityClass.ObjectMeta, row.Status, row.StatusKey)
+	detail.YAML = resourceYAML(yamlPriorityClass)
+	detail.Fields = detailFields("Value", fmt.Sprint(priorityClass.Value), "Global Default", fmt.Sprint(priorityClass.GlobalDefault), "Preemption", preemptionPolicyValue(priorityClass.PreemptionPolicy), "Description", priorityClass.Description)
+	return compactDetail(detail)
+}
+
+func runtimeClassDetail(runtimeClass nodev1.RuntimeClass) ResourceDetail {
+	yamlRuntimeClass := runtimeClass
+	yamlRuntimeClass.TypeMeta = metav1.TypeMeta{APIVersion: "node.k8s.io/v1", Kind: "RuntimeClass"}
+	yamlRuntimeClass.ManagedFields = nil
+	row := runtimeClassRow(runtimeClass)
+	detail := detailBase(KindRuntimeClasses, "RuntimeClasses", runtimeClass.ObjectMeta, row.Status, row.StatusKey)
+	detail.YAML = resourceYAML(yamlRuntimeClass)
+	detail.Fields = detailFields("Handler", runtimeClass.Handler)
+	return compactDetail(detail)
+}
+
+func leaseDetail(lease coordinationv1.Lease) ResourceDetail {
+	yamlLease := lease
+	yamlLease.TypeMeta = metav1.TypeMeta{APIVersion: "coordination.k8s.io/v1", Kind: "Lease"}
+	yamlLease.ManagedFields = nil
+	row := leaseRow(lease)
+	detail := detailBase(KindLeases, "Leases", lease.ObjectMeta, row.Status, row.StatusKey)
+	detail.YAML = resourceYAML(yamlLease)
+	detail.Fields = detailFields("Namespace", lease.Namespace, "Holder", row.Cells[2].Value, "Renew Time", row.Cells[3].Value)
+	return compactDetail(detail)
+}
+
+func mutatingWebhookConfigurationDetail(config admissionv1.MutatingWebhookConfiguration) ResourceDetail {
+	yamlConfig := config
+	yamlConfig.TypeMeta = metav1.TypeMeta{APIVersion: "admissionregistration.k8s.io/v1", Kind: "MutatingWebhookConfiguration"}
+	yamlConfig.ManagedFields = nil
+	row := mutatingWebhookConfigurationRow(config)
+	detail := detailBase(KindMutatingWebhookConfigurations, "MutatingWebhookConfigurations", config.ObjectMeta, row.Status, row.StatusKey)
+	detail.YAML = resourceYAML(yamlConfig)
+	detail.Fields = detailFields("Webhooks", fmt.Sprint(len(config.Webhooks)))
+	return compactDetail(detail)
+}
+
+func validatingWebhookConfigurationDetail(config admissionv1.ValidatingWebhookConfiguration) ResourceDetail {
+	yamlConfig := config
+	yamlConfig.TypeMeta = metav1.TypeMeta{APIVersion: "admissionregistration.k8s.io/v1", Kind: "ValidatingWebhookConfiguration"}
+	yamlConfig.ManagedFields = nil
+	row := validatingWebhookConfigurationRow(config)
+	detail := detailBase(KindValidatingWebhookConfigurations, "ValidatingWebhookConfigurations", config.ObjectMeta, row.Status, row.StatusKey)
+	detail.YAML = resourceYAML(yamlConfig)
+	detail.Fields = detailFields("Webhooks", fmt.Sprint(len(config.Webhooks)))
+	return compactDetail(detail)
+}
+
+func eventDetail(event corev1.Event) ResourceDetail {
+	yamlEvent := event
+	yamlEvent.TypeMeta = metav1.TypeMeta{APIVersion: "v1", Kind: "Event"}
+	yamlEvent.ManagedFields = nil
+	row := eventRow(event)
+	detail := detailBase(KindEvents, "Events", event.ObjectMeta, row.Status, row.StatusKey)
+	detail.YAML = resourceYAML(yamlEvent)
+	detail.Fields = detailFields("Namespace", event.Namespace, "Type", event.Type, "Reason", event.Reason, "Object", row.Cells[4].Value, "Count", fmt.Sprint(event.Count), "Message", event.Message)
+	return compactDetail(detail)
+}
+
 func (s *ResourceStore) withEvents(detail ResourceDetail) ResourceDetail {
 	if s == nil || s.events == nil || detail.Name == "" {
 		return detail
@@ -369,14 +895,68 @@ func resourceObjectKind(kind ResourceKind) string {
 		return "StatefulSet"
 	case KindDaemonSet:
 		return "DaemonSet"
+	case KindReplicaSets:
+		return "ReplicaSet"
+	case KindJobs:
+		return "Job"
+	case KindCronJobs:
+		return "CronJob"
+	case KindPersistentVolumeClaims:
+		return "PersistentVolumeClaim"
+	case KindPersistentVolumes:
+		return "PersistentVolume"
+	case KindStorageClasses:
+		return "StorageClass"
 	case KindServices:
 		return "Service"
+	case KindEndpoints:
+		return "Endpoints"
+	case KindEndpointSlices:
+		return "EndpointSlice"
 	case KindIngresses:
 		return "Ingress"
+	case KindIngressClasses:
+		return "IngressClass"
+	case KindNetworkPolicies:
+		return "NetworkPolicy"
+	case KindServiceAccounts:
+		return "ServiceAccount"
+	case KindRoles:
+		return "Role"
+	case KindRoleBindings:
+		return "RoleBinding"
+	case KindClusterRoles:
+		return "ClusterRole"
+	case KindClusterRoleBindings:
+		return "ClusterRoleBinding"
+	case KindConfigMaps:
+		return "ConfigMap"
+	case KindSecrets:
+		return "Secret"
+	case KindHorizontalPodAutoscalers:
+		return "HorizontalPodAutoscaler"
+	case KindPodDisruptionBudgets:
+		return "PodDisruptionBudget"
+	case KindResourceQuotas:
+		return "ResourceQuota"
+	case KindLimitRanges:
+		return "LimitRange"
+	case KindPriorityClasses:
+		return "PriorityClass"
+	case KindRuntimeClasses:
+		return "RuntimeClass"
+	case KindLeases:
+		return "Lease"
+	case KindMutatingWebhookConfigurations:
+		return "MutatingWebhookConfiguration"
+	case KindValidatingWebhookConfigurations:
+		return "ValidatingWebhookConfiguration"
 	case KindNodes:
 		return "Node"
 	case KindNamespaces:
 		return "Namespace"
+	case KindEvents:
+		return "Event"
 	default:
 		return ""
 	}
@@ -435,6 +1015,27 @@ func detailFields(values ...string) []DetailField {
 		fields = append(fields, DetailField{Name: values[i], Value: values[i+1]})
 	}
 	return fields
+}
+
+func valueOrZero(value *int32) int32 {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
+func boolPtrValue(value *bool) string {
+	if value == nil {
+		return ""
+	}
+	return fmt.Sprint(*value)
+}
+
+func formatDetailTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format("2006-01-02 15:04:05")
 }
 
 func mapFields(values map[string]string) []DetailField {

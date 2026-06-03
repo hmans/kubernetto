@@ -195,7 +195,80 @@ select {
   color: currentColor;
 }
 
+.resource-nav {
+  display: grid;
+  gap: 5px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.resource-nav-group {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.resource-group-button,
+.resource-child-button {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--side-text);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.resource-group-button {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border-radius: 7px;
+  padding: 8px 10px;
+  font-weight: 680;
+}
+
+.resource-group-button:hover,
+.resource-group-button[aria-pressed="true"] {
+  background: var(--side-hover);
+  color: var(--side-strong);
+}
+
+.resource-nav-children {
+  display: grid;
+  gap: 1px;
+  padding: 2px 0 7px 31px;
+}
+
+.resource-child-button {
+  position: relative;
+  min-height: 31px;
+  border-radius: 6px;
+  padding: 5px 8px 5px 14px;
+  color: var(--side-muted);
+  overflow-wrap: anywhere;
+}
+
+.resource-child-button:hover,
+.resource-child-button[aria-pressed="true"] {
+  color: var(--side-strong);
+}
+
+.resource-child-button[aria-pressed="true"]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
 .content-grid {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 14px;
@@ -204,6 +277,41 @@ select {
 
 .content-grid.has-detail {
   grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+}
+
+.content-grid.pending > :not(.view-loading) {
+  opacity: .56;
+  transition: opacity 120ms ease;
+}
+
+.view-loading {
+  position: absolute;
+  z-index: 5;
+  top: 12px;
+  right: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  color: var(--text-strong);
+  box-shadow: var(--shadow);
+  font-size: 12px;
+  font-weight: 680;
+  pointer-events: none;
+}
+
+.view-loading [class*="loader"] {
+  width: 14px;
+  height: 14px;
+  animation: spin 780ms linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 .overview-stat-card {

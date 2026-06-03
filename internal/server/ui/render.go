@@ -32,6 +32,13 @@ type PageState struct {
 	NamespaceErr string
 }
 
+type ResourceNavGroup struct {
+	ID        string
+	Label     string
+	Default   kube.ResourceDef
+	Resources []kube.ResourceDef
+}
+
 type Signals struct {
 	Context           string `json:"context"`
 	Resource          string `json:"resource"`
@@ -107,27 +114,29 @@ func contentGridClass(state PageState) string {
 
 func appSignalAttrs(state PageState) templ.Attributes {
 	return templ.Attributes{
-		"data-signals:context":           signalLiteral(state.Signals.Context),
-		"data-signals:resource":          signalLiteral(state.Signals.Resource),
-		"data-signals:namespace":         signalLiteral(state.Signals.Namespace),
-		"data-signals:query":             signalLiteral(state.Signals.Query),
-		"data-signals:sortColumn":        signalLiteral(state.Signals.SortColumn),
-		"data-signals:sortOrder":         signalLiteral(state.Signals.SortOrder),
-		"data-signals:selectedName":      signalLiteral(state.Signals.SelectedName),
-		"data-signals:selectedNamespace": signalLiteral(state.Signals.SelectedNamespace),
-		"data-signals:detailMode":        signalLiteral(state.Signals.DetailMode),
-		"data-signals:loading":           "false",
-		"data-on-interval__duration.5s":  "@get('/ui/summary')",
+		"data-signals:context":            signalLiteral(state.Signals.Context),
+		"data-signals:resource":           signalLiteral(state.Signals.Resource),
+		"data-signals:namespace":          signalLiteral(state.Signals.Namespace),
+		"data-signals:query":              signalLiteral(state.Signals.Query),
+		"data-signals:sort-column":        signalLiteral(state.Signals.SortColumn),
+		"data-signals:sort-order":         signalLiteral(state.Signals.SortOrder),
+		"data-signals:selected-name":      signalLiteral(state.Signals.SelectedName),
+		"data-signals:selected-namespace": signalLiteral(state.Signals.SelectedNamespace),
+		"data-signals:detail-mode":        signalLiteral(state.Signals.DetailMode),
+		"data-signals:loading":            "false",
+		"data-on-interval__duration.5s":   "@get('/ui/summary')",
 	}
 }
 
 func tableAutoRefreshAttrs(state PageState) templ.Attributes {
+	attrs := templ.Attributes{
+		"data-class:pending": "$loading",
+	}
 	if isOverview(state) {
-		return templ.Attributes{}
+		return attrs
 	}
-	return templ.Attributes{
-		"data-on-interval__duration.5s": "@get('/ui/table')",
-	}
+	attrs["data-on-interval__duration.5s"] = "@get('/ui/table')"
+	return attrs
 }
 
 func resourceButtonAttrs(def kube.ResourceDef) templ.Attributes {
@@ -151,17 +160,129 @@ func resourceButtonIconClass(kind kube.ResourceKind) string {
 		return "icon-[uil--layers]"
 	case kube.KindDaemonSet:
 		return "icon-[uil--layer-group]"
+	case kube.KindReplicaSets:
+		return "icon-[uil--copy]"
+	case kube.KindJobs:
+		return "icon-[uil--check-circle]"
+	case kube.KindCronJobs:
+		return "icon-[uil--clock]"
+	case kube.KindPersistentVolumeClaims:
+		return "icon-[uil--database]"
+	case kube.KindPersistentVolumes:
+		return "icon-[uil--server]"
+	case kube.KindStorageClasses:
+		return "icon-[uil--archive]"
 	case kube.KindServices:
 		return "icon-[uil--server-alt]"
+	case kube.KindEndpoints:
+		return "icon-[uil--sitemap]"
+	case kube.KindEndpointSlices:
+		return "icon-[uil--share-alt]"
 	case kube.KindIngresses:
 		return "icon-[uil--globe]"
+	case kube.KindIngressClasses:
+		return "icon-[uil--compass]"
+	case kube.KindNetworkPolicies:
+		return "icon-[uil--shield]"
+	case kube.KindServiceAccounts:
+		return "icon-[uil--user]"
+	case kube.KindRoles:
+		return "icon-[uil--key-skeleton]"
+	case kube.KindRoleBindings:
+		return "icon-[uil--link]"
+	case kube.KindClusterRoles:
+		return "icon-[uil--keyhole-circle]"
+	case kube.KindClusterRoleBindings:
+		return "icon-[uil--link-h]"
+	case kube.KindConfigMaps:
+		return "icon-[uil--setting]"
+	case kube.KindSecrets:
+		return "icon-[uil--lock]"
+	case kube.KindHorizontalPodAutoscalers:
+		return "icon-[uil--arrows-resize-h]"
+	case kube.KindPodDisruptionBudgets:
+		return "icon-[uil--shield-exclamation]"
+	case kube.KindResourceQuotas:
+		return "icon-[uil--chart-pie]"
+	case kube.KindLimitRanges:
+		return "icon-[uil--sliders-v]"
+	case kube.KindPriorityClasses:
+		return "icon-[uil--arrow-up]"
+	case kube.KindRuntimeClasses:
+		return "icon-[uil--processor]"
+	case kube.KindLeases:
+		return "icon-[uil--file-contract]"
+	case kube.KindMutatingWebhookConfigurations, kube.KindValidatingWebhookConfigurations:
+		return "icon-[uil--web-grid]"
 	case kube.KindNodes:
 		return "icon-[uil--server-network]"
 	case kube.KindNamespaces:
 		return "icon-[uil--folder-network]"
+	case kube.KindEvents:
+		return "icon-[uil--bolt]"
 	default:
 		return "icon-[uil--servers]"
 	}
+}
+
+func resourceGroupIconClass(group ResourceNavGroup) string {
+	switch group.ID {
+	case "overview":
+		return "icon-[uil--dashboard]"
+	case "workloads":
+		return "icon-[uil--clock]"
+	case "storage":
+		return "icon-[uil--database]"
+	case "network":
+		return "icon-[uil--desktop]"
+	case "security":
+		return "icon-[uil--lock]"
+	case "configuration":
+		return "icon-[uil--setting]"
+	case "cluster":
+		return "icon-[uil--server-network]"
+	default:
+		return resourceButtonIconClass(group.Default.Kind)
+	}
+}
+
+func resourceNavGroups(resources []kube.ResourceDef) []ResourceNavGroup {
+	byKind := make(map[kube.ResourceKind]kube.ResourceDef, len(resources))
+	for _, resource := range resources {
+		byKind[resource.Kind] = resource
+	}
+	groups := make([]ResourceNavGroup, 0, len(kube.ResourceGroups))
+	for _, group := range kube.ResourceGroups {
+		navGroup := ResourceNavGroup{ID: group.ID, Label: group.Label, Default: byKind[group.DefaultKind]}
+		for _, kind := range group.Kinds {
+			if resource, ok := byKind[kind]; ok {
+				navGroup.Resources = append(navGroup.Resources, resource)
+				if resource.Default || navGroup.Default.Kind == "" {
+					navGroup.Default = resource
+				}
+			}
+		}
+		if navGroup.Default.Kind != "" {
+			groups = append(groups, navGroup)
+		}
+	}
+	return groups
+}
+
+func resourceGroupActive(group ResourceNavGroup, activeResource string) bool {
+	for _, resource := range group.Resources {
+		if string(resource.Kind) == activeResource {
+			return true
+		}
+	}
+	return false
+}
+
+func resourceGroupChildren(group ResourceNavGroup) []kube.ResourceDef {
+	if group.ID == "overview" {
+		return nil
+	}
+	return group.Resources
 }
 
 func overviewResourceLinkAttrs(kind kube.ResourceKind) templ.Attributes {

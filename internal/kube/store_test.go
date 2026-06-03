@@ -8,13 +8,25 @@ import (
 	"testing"
 	"time"
 
+	admissionv1 "k8s.io/api/admissionregistration/v1"
 	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
+	batchv1 "k8s.io/api/batch/v1"
+	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
+	networkingv1 "k8s.io/api/networking/v1"
+	nodev1 "k8s.io/api/node/v1"
+	policyv1 "k8s.io/api/policy/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
+	schedulingv1 "k8s.io/api/scheduling/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	intstr "k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 	metricsv1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
@@ -252,6 +264,98 @@ func TestResourceStoreReadsDoNotCallKubeAPI(t *testing.T) {
 
 	if got := len(clientset.Actions()); got != actionsAfterSync {
 		t.Fatalf("client actions after cached reads = %d, want %d", got, actionsAfterSync)
+	}
+}
+
+func TestResourceStoreTablesAndDetailsForExpandedResources(t *testing.T) {
+	port := int32(8080)
+	protocol := corev1.ProtocolTCP
+	minAvailable := intstr.FromInt(1)
+	clientset := fake.NewSimpleClientset(
+		&appsv1.ReplicaSet{ObjectMeta: metav1.ObjectMeta{Name: "api-rs", Namespace: "prod"}, Spec: appsv1.ReplicaSetSpec{Replicas: ptr(int32(1))}, Status: appsv1.ReplicaSetStatus{Replicas: 1, ReadyReplicas: 1}},
+		&batchv1.Job{ObjectMeta: metav1.ObjectMeta{Name: "api-job", Namespace: "prod"}, Spec: batchv1.JobSpec{Completions: ptr(int32(1))}, Status: batchv1.JobStatus{Succeeded: 1}},
+		&batchv1.CronJob{ObjectMeta: metav1.ObjectMeta{Name: "api-cron", Namespace: "prod"}, Spec: batchv1.CronJobSpec{Schedule: "*/5 * * * *"}},
+		&corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: "api-pvc", Namespace: "prod"}, Spec: corev1.PersistentVolumeClaimSpec{VolumeName: "api-pv"}, Status: corev1.PersistentVolumeClaimStatus{Phase: corev1.ClaimBound, Capacity: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")}}},
+		&corev1.PersistentVolume{ObjectMeta: metav1.ObjectMeta{Name: "api-pv"}, Spec: corev1.PersistentVolumeSpec{Capacity: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")}, PersistentVolumeReclaimPolicy: corev1.PersistentVolumeReclaimRetain}, Status: corev1.PersistentVolumeStatus{Phase: corev1.VolumeBound}},
+		&storagev1.StorageClass{ObjectMeta: metav1.ObjectMeta{Name: "fast"}, Provisioner: "kubernetes.io/no-provisioner"},
+		&corev1.Endpoints{ObjectMeta: metav1.ObjectMeta{Name: "api-endpoints", Namespace: "prod"}, Subsets: []corev1.EndpointSubset{{Addresses: []corev1.EndpointAddress{{IP: "10.0.0.1"}}, Ports: []corev1.EndpointPort{{Port: 80, Protocol: corev1.ProtocolTCP}}}}},
+		&discoveryv1.EndpointSlice{ObjectMeta: metav1.ObjectMeta{Name: "api-slice", Namespace: "prod"}, AddressType: discoveryv1.AddressTypeIPv4, Endpoints: []discoveryv1.Endpoint{{Addresses: []string{"10.0.0.1"}}}, Ports: []discoveryv1.EndpointPort{{Port: &port, Protocol: &protocol}}},
+		&networkingv1.IngressClass{ObjectMeta: metav1.ObjectMeta{Name: "nginx"}, Spec: networkingv1.IngressClassSpec{Controller: "k8s.io/ingress-nginx"}},
+		&networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: "api-netpol", Namespace: "prod"}, Spec: networkingv1.NetworkPolicySpec{PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}}, PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress}}},
+		&corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: "api-sa", Namespace: "prod"}},
+		&rbacv1.Role{ObjectMeta: metav1.ObjectMeta{Name: "api-role", Namespace: "prod"}, Rules: []rbacv1.PolicyRule{{Verbs: []string{"get"}, Resources: []string{"pods"}}}},
+		&rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "api-binding", Namespace: "prod"}, RoleRef: rbacv1.RoleRef{Kind: "Role", Name: "api-role"}},
+		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "api-cluster-role"}, Rules: []rbacv1.PolicyRule{{Verbs: []string{"list"}, Resources: []string{"nodes"}}}},
+		&rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "api-cluster-binding"}, RoleRef: rbacv1.RoleRef{Kind: "ClusterRole", Name: "api-cluster-role"}},
+		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "api-config", Namespace: "prod"}, Data: map[string]string{"key": "value"}},
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "api-secret", Namespace: "prod"}, Type: corev1.SecretTypeOpaque, Data: map[string][]byte{"token": []byte("secret")}},
+		&autoscalingv2.HorizontalPodAutoscaler{ObjectMeta: metav1.ObjectMeta{Name: "api-hpa", Namespace: "prod"}, Spec: autoscalingv2.HorizontalPodAutoscalerSpec{ScaleTargetRef: autoscalingv2.CrossVersionObjectReference{Kind: "Deployment", Name: "api"}, MinReplicas: ptr(int32(1)), MaxReplicas: 3}, Status: autoscalingv2.HorizontalPodAutoscalerStatus{CurrentReplicas: 1}},
+		&policyv1.PodDisruptionBudget{ObjectMeta: metav1.ObjectMeta{Name: "api-pdb", Namespace: "prod"}, Spec: policyv1.PodDisruptionBudgetSpec{MinAvailable: &minAvailable}, Status: policyv1.PodDisruptionBudgetStatus{DisruptionsAllowed: 1}},
+		&corev1.ResourceQuota{ObjectMeta: metav1.ObjectMeta{Name: "api-quota", Namespace: "prod"}, Status: corev1.ResourceQuotaStatus{Hard: corev1.ResourceList{corev1.ResourcePods: resource.MustParse("10")}}},
+		&corev1.LimitRange{ObjectMeta: metav1.ObjectMeta{Name: "api-limits", Namespace: "prod"}, Spec: corev1.LimitRangeSpec{Limits: []corev1.LimitRangeItem{{Type: corev1.LimitTypeContainer}}}},
+		&schedulingv1.PriorityClass{ObjectMeta: metav1.ObjectMeta{Name: "high"}, Value: 1000},
+		&nodev1.RuntimeClass{ObjectMeta: metav1.ObjectMeta{Name: "runc"}, Handler: "runc"},
+		&coordinationv1.Lease{ObjectMeta: metav1.ObjectMeta{Name: "api-lease", Namespace: "prod"}, Spec: coordinationv1.LeaseSpec{HolderIdentity: ptr("api")}},
+		&admissionv1.MutatingWebhookConfiguration{ObjectMeta: metav1.ObjectMeta{Name: "api-mutating"}, Webhooks: []admissionv1.MutatingWebhook{{Name: "mutate.example.com"}}},
+		&admissionv1.ValidatingWebhookConfiguration{ObjectMeta: metav1.ObjectMeta{Name: "api-validating"}, Webhooks: []admissionv1.ValidatingWebhook{{Name: "validate.example.com"}}},
+		&corev1.Event{ObjectMeta: metav1.ObjectMeta{Name: "api-event", Namespace: "prod"}, Type: corev1.EventTypeWarning, Reason: "BackOff", Message: "retrying", InvolvedObject: corev1.ObjectReference{Kind: "Pod", Name: "api", Namespace: "prod"}},
+	)
+	store := syncedTestStore(t, clientset)
+
+	tests := []struct {
+		kind      ResourceKind
+		namespace string
+		name      string
+	}{
+		{KindReplicaSets, "prod", "api-rs"},
+		{KindJobs, "prod", "api-job"},
+		{KindCronJobs, "prod", "api-cron"},
+		{KindPersistentVolumeClaims, "prod", "api-pvc"},
+		{KindPersistentVolumes, "", "api-pv"},
+		{KindStorageClasses, "", "fast"},
+		{KindEndpoints, "prod", "api-endpoints"},
+		{KindEndpointSlices, "prod", "api-slice"},
+		{KindIngressClasses, "", "nginx"},
+		{KindNetworkPolicies, "prod", "api-netpol"},
+		{KindServiceAccounts, "prod", "api-sa"},
+		{KindRoles, "prod", "api-role"},
+		{KindRoleBindings, "prod", "api-binding"},
+		{KindClusterRoles, "", "api-cluster-role"},
+		{KindClusterRoleBindings, "", "api-cluster-binding"},
+		{KindConfigMaps, "prod", "api-config"},
+		{KindSecrets, "prod", "api-secret"},
+		{KindHorizontalPodAutoscalers, "prod", "api-hpa"},
+		{KindPodDisruptionBudgets, "prod", "api-pdb"},
+		{KindResourceQuotas, "prod", "api-quota"},
+		{KindLimitRanges, "prod", "api-limits"},
+		{KindPriorityClasses, "", "high"},
+		{KindRuntimeClasses, "", "runc"},
+		{KindLeases, "prod", "api-lease"},
+		{KindMutatingWebhookConfigurations, "", "api-mutating"},
+		{KindValidatingWebhookConfigurations, "", "api-validating"},
+		{KindEvents, "prod", "api-event"},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.kind), func(t *testing.T) {
+			table := store.Table(tt.kind, tt.namespace, "")
+			if table.Error != "" {
+				t.Fatalf("table error = %q", table.Error)
+			}
+			if len(table.Rows) != 1 || table.Rows[0].Name != tt.name {
+				t.Fatalf("rows = %#v, want single row %q", rowNames(table.Rows), tt.name)
+			}
+			detail := store.Detail(tt.kind, tt.namespace, tt.name)
+			if detail.Error != "" {
+				t.Fatalf("detail error = %q", detail.Error)
+			}
+			if detail.Name != tt.name || detail.YAML == "" {
+				t.Fatalf("detail = %#v, want name and yaml", detail)
+			}
+			if tt.kind == KindSecrets && strings.Contains(detail.YAML, "c2VjcmV0") {
+				t.Fatalf("secret detail yaml exposed encoded secret data: %q", detail.YAML)
+			}
+		})
 	}
 }
 
