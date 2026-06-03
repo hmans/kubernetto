@@ -152,7 +152,7 @@ func (s *Server) handlePrometheusChart(w http.ResponseWriter, r *http.Request) {
 			Metrics:   unavailableChartMetrics("No Kubernetes client is configured."),
 		}
 		if session != nil && session.store != nil && name != "" {
-			chart = session.store.PodUsageDetailChart(namespace, name, params.Get("cpu"), params.Get("memory"))
+			chart = session.store.PodUsageDetailChart(namespace, name, "", "")
 		}
 		sse.PatchElements(ui.RenderFragment(ui.DetailPodUsagePanel(chart)))
 		return
@@ -160,7 +160,7 @@ func (s *Server) handlePrometheusChart(w http.ResponseWriter, r *http.Request) {
 
 	chart := kube.PodUsageOverviewChart{Metrics: unavailableChartMetrics("No Kubernetes client is configured.")}
 	if session != nil && session.store != nil {
-		chart = session.store.PodUsageOverviewChart(params.Get("cpu"), params.Get("memory"), chartLimit(params.Get("limit")))
+		chart = session.store.PodUsageOverviewChart("", "", chartLimit(params.Get("limit")))
 	}
 	sse.PatchElements(ui.RenderFragment(ui.OverviewPodUsagePanel(chart)))
 }
@@ -186,6 +186,10 @@ func (s *Server) handlePrometheusQueryRange(w http.ResponseWriter, r *http.Reque
 	}
 	if len(request.Queries) > prometheusQueryRangeMaxQueries {
 		writeCompressedJSON(w, r, http.StatusBadRequest, map[string]string{"error": "at most twelve PromQL queries can be loaded at once"})
+		return
+	}
+	if err := kube.ValidatePrometheusRangeQueries(request.Queries); err != nil {
+		writeCompressedJSON(w, r, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 
