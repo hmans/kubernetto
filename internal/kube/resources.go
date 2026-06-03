@@ -282,6 +282,13 @@ type DetailSection struct {
 type DetailField struct {
 	Name  string
 	Value string
+	Link  *DetailLink
+}
+
+type DetailLink struct {
+	Resource  ResourceKind
+	Namespace string
+	Name      string
 }
 
 func NormalizeKind(kind string) ResourceKind {

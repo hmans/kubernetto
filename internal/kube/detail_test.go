@@ -108,6 +108,38 @@ func TestPodDetailUsesConditionAsFallbackProblem(t *testing.T) {
 	}
 }
 
+func TestOwnerSectionLinksKnownOwners(t *testing.T) {
+	detail := podDetail(corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "api-pod",
+			Namespace: "prod",
+			OwnerReferences: []metav1.OwnerReference{
+				{Kind: "Deployment", Name: "api"},
+				{Kind: "Widget", Name: "custom-owner"},
+			},
+		},
+	})
+
+	owner := detailSectionField(detail.Sections, "Owners", "Deployment")
+	if owner == nil {
+		t.Fatalf("deployment owner field missing")
+	}
+	if owner.Link == nil {
+		t.Fatalf("deployment owner link missing")
+	}
+	if owner.Link.Resource != KindDeployments || owner.Link.Namespace != "prod" || owner.Link.Name != "api" {
+		t.Fatalf("deployment owner link = %#v", owner.Link)
+	}
+
+	customOwner := detailSectionField(detail.Sections, "Owners", "Widget")
+	if customOwner == nil {
+		t.Fatalf("custom owner field missing")
+	}
+	if customOwner.Link != nil {
+		t.Fatalf("custom owner link = %#v, want nil for unknown owner kind", customOwner.Link)
+	}
+}
+
 func detailFieldValue(fields []DetailField, name string) string {
 	for _, field := range fields {
 		if field.Name == name {
@@ -118,11 +150,23 @@ func detailFieldValue(fields []DetailField, name string) string {
 }
 
 func detailSectionFieldValue(sections []DetailSection, title, name string) string {
+	field := detailSectionField(sections, title, name)
+	if field == nil {
+		return ""
+	}
+	return field.Value
+}
+
+func detailSectionField(sections []DetailSection, title, name string) *DetailField {
 	for _, section := range sections {
 		if section.Title != title {
 			continue
 		}
-		return detailFieldValue(section.Fields, name)
+		for i := range section.Fields {
+			if section.Fields[i].Name == name {
+				return &section.Fields[i]
+			}
+		}
 	}
-	return ""
+	return nil
 }
