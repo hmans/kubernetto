@@ -13,6 +13,7 @@ import (
 
 	"kubernetto/internal/kube"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -74,11 +75,33 @@ func TestHandleIndexDefaultsToClusterOverview(t *testing.T) {
 	if !strings.Contains(body, `data-signals:resource="&#34;overview&#34;"`) {
 		t.Fatalf("index did not render overview resource signal")
 	}
-	if !strings.Contains(body, `datastar@v1.0.2`) {
-		t.Fatalf("index did not render version-locked Datastar asset")
+	if !strings.Contains(body, `src="/assets/datastar.js"`) {
+		t.Fatalf("index did not render bundled Datastar asset")
+	}
+	if strings.Contains(body, `cdn.jsdelivr.net`) {
+		t.Fatalf("index rendered external Datastar CDN asset")
 	}
 	if !strings.Contains(body, "Cluster Overview") {
 		t.Fatalf("index did not render cluster overview")
+	}
+}
+
+func TestRoutesSetTightenedSecurityHeaders(t *testing.T) {
+	app := New(nil, context.Background(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	res := httptest.NewRecorder()
+
+	app.Routes().ServeHTTP(res, req)
+
+	csp := res.Header().Get("Content-Security-Policy")
+	if !strings.Contains(csp, "script-src 'self' 'unsafe-eval'") {
+		t.Fatalf("csp script-src = %q, want self with Datastar eval allowance", csp)
+	}
+	if strings.Contains(csp, "cdn.jsdelivr.net") {
+		t.Fatalf("csp still allows jsDelivr: %q", csp)
+	}
+	if !strings.Contains(csp, "connect-src 'self'") {
+		t.Fatalf("csp connect-src = %q, want self", csp)
 	}
 }
 
@@ -364,10 +387,19 @@ func TestHandleTablePatchesPageChromeForNavigation(t *testing.T) {
 		`>Deployments</h1>`,
 		`id="summary-slot"`,
 		`id="resource-controls"`,
-		`aria-label="Table controls"`,
+		`aria-label="Table search"`,
+		`id="query"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("table navigation response did not patch %q:\n%s", want, body)
+		}
+	}
+	for _, unwanted := range []string{
+		`id="namespace-picker"`,
+		`aria-label="Refresh"`,
+	} {
+		if strings.Contains(body, unwanted) {
+			t.Fatalf("table navigation response patched removed control %q:\n%s", unwanted, body)
 		}
 	}
 }
@@ -419,12 +451,30 @@ func TestMultiClusterTableAggregatesRowsWithClusterColumn(t *testing.T) {
 	}
 }
 
-func TestMultiClusterTableCanFilterByCluster(t *testing.T) {
+func TestMultiClusterTableDoesNotFilterByClusterOrNodeContext(t *testing.T) {
+	devPod := testPod("api", corev1.PodRunning)
+	devPod.Spec.NodeName = "dev"
+	prodPod := testPod("worker", corev1.PodRunning)
+	prodPod.Spec.NodeName = "prod"
+	app := New([]*kube.Cluster{
+		testClusterWithPods("dev", devPod),
+		testClusterWithPods("prod", prodPod),
+	}, context.Background(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/ui/table?resource=pods&query=prod", nil)
+
+	state := app.state(readSignals(req))
+
+	if len(state.Table.Rows) != 0 {
+		t.Fatalf("rows = %d, want 0 because cluster/node context is not searched: %#v", len(state.Table.Rows), state.Table.Rows)
+	}
+}
+
+func TestMultiClusterTableFiltersByResourceName(t *testing.T) {
 	app := New([]*kube.Cluster{
 		testClusterWithPod("dev", "api"),
 		testClusterWithPod("prod", "worker"),
 	}, context.Background(), nil)
-	req := httptest.NewRequest(http.MethodGet, "/ui/table?resource=pods&query=prod", nil)
+	req := httptest.NewRequest(http.MethodGet, "/ui/table?resource=pods&query=worker", nil)
 
 	state := app.state(readSignals(req))
 
@@ -433,6 +483,25 @@ func TestMultiClusterTableCanFilterByCluster(t *testing.T) {
 	}
 	if state.Table.Rows[0].Name != "worker" || state.Table.Rows[0].Cluster != "prod" {
 		t.Fatalf("filtered row = %#v, want prod worker", state.Table.Rows[0])
+	}
+}
+
+func TestMultiClusterDeploymentTableDoesNotFilterByNamespace(t *testing.T) {
+	app := New([]*kube.Cluster{
+		testClusterWithObjects("dev",
+			testDeployment("alice-backend", "chatto-dev"),
+			testDeployment("chatto-hub", "platform"),
+		),
+		testClusterWithObjects("prod",
+			testDeployment("bob-backend", "chatto-dev"),
+		),
+	}, context.Background(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/ui/table?resource=deployments&query=chatto", nil)
+
+	state := app.state(readSignals(req))
+
+	if got, want := tableRowNames(state.Table.Rows), []string{"chatto-hub"}; !equalStringSlices(got, want) {
+		t.Fatalf("filtered deployment rows = %#v, want %#v", got, want)
 	}
 }
 
@@ -562,8 +631,8 @@ func TestHandleIndexRendersLazyOverviewChartShell(t *testing.T) {
 	if !strings.Contains(body, `/ui/charts/prometheus`) {
 		t.Fatalf("index did not render pod usage lazy-load action")
 	}
-	if !strings.Contains(body, `cpu=`) || !strings.Contains(body, `memory=`) {
-		t.Fatalf("index did not render PromQL query parameters")
+	if strings.Contains(body, `cpu=`) || strings.Contains(body, `memory=`) {
+		t.Fatalf("index rendered PromQL query parameters")
 	}
 	if !strings.Contains(body, `data-on-intersect__once=`) {
 		t.Fatalf("index did not render chart viewport-load hook")
@@ -590,12 +659,13 @@ func TestPodTableRendersLazySparklineCells(t *testing.T) {
 		`cluster-context="test"`,
 		`pod-namespace="default"`,
 		`pod-name="api"`,
-		`cpu-query=`,
-		`memory-query=`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("pod table did not render lazy sparkline marker %q: %s", want, body)
 		}
+	}
+	if strings.Contains(body, `cpu-query=`) || strings.Contains(body, `memory-query=`) {
+		t.Fatalf("pod table rendered PromQL sparkline attributes: %s", body)
 	}
 }
 
@@ -632,8 +702,6 @@ func TestChartEndpointsRenderPatchFragments(t *testing.T) {
 		"panel":     {"pod-usage-detail"},
 		"namespace": {"prod"},
 		"name":      {"api"},
-		"cpu":       {kube.PodCPUQueryFor("prod", "api")},
-		"memory":    {kube.PodMemoryQueryFor("prod", "api")},
 	}
 	tests := []struct {
 		path string
@@ -660,9 +728,10 @@ func TestChartEndpointsRenderPatchFragments(t *testing.T) {
 	}
 }
 
-func TestPrometheusQueryRangeEndpointReturnsCompressedJSON(t *testing.T) {
+func TestPrometheusPodUsageRangeEndpointReturnsCompressedJSON(t *testing.T) {
 	app := New(nil, context.Background(), nil)
-	req := httptest.NewRequest(http.MethodPost, "/ui/prometheus/query-range", strings.NewReader(`{"queries":[{"name":"cpu","query":"up"}]}`))
+	requestBody := `{"pods":[{"namespace":"default","pod":"api"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/prometheus/pod-usage-range", strings.NewReader(requestBody))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept-Encoding", "gzip")
 	res := httptest.NewRecorder()
@@ -695,6 +764,35 @@ func TestPrometheusQueryRangeEndpointReturnsCompressedJSON(t *testing.T) {
 	}
 	if payload.Message != "No Kubernetes client is configured." {
 		t.Fatalf("message = %q", payload.Message)
+	}
+}
+
+func TestPrometheusPodUsageRangeEndpointRequiresPods(t *testing.T) {
+	app := New(nil, context.Background(), nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/prometheus/pod-usage-range", strings.NewReader(`{"queries":[{"name":"cpu","query":"up"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	res := httptest.NewRecorder()
+
+	app.Routes().ServeHTTP(res, req)
+
+	if res.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", res.Code, http.StatusBadRequest)
+	}
+	if body := res.Body.String(); !strings.Contains(body, "at least one pod is required") {
+		t.Fatalf("body did not contain pod validation error: %s", body)
+	}
+}
+
+func TestPrometheusQueryRangeEndpointIsNotRegistered(t *testing.T) {
+	app := New(nil, context.Background(), nil)
+	req := httptest.NewRequest(http.MethodPost, "/ui/prometheus/query-range", strings.NewReader(`{"queries":[{"name":"cpu","query":"up"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	res := httptest.NewRecorder()
+
+	app.Routes().ServeHTTP(res, req)
+
+	if res.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want %d", res.Code, http.StatusMethodNotAllowed)
 	}
 }
 
@@ -760,6 +858,45 @@ func testPod(name string, phase corev1.PodPhase) *corev1.Pod {
 	}
 }
 
+func testDeployment(name, namespace string) *appsv1.Deployment {
+	return &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: int32Ptr(1),
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": name}},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": name}},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: name}}},
+			},
+		},
+		Status: appsv1.DeploymentStatus{ReadyReplicas: 1},
+	}
+}
+
+func int32Ptr(value int32) *int32 {
+	return &value
+}
+
+func tableRowNames(rows []kube.Row) []string {
+	names := make([]string, 0, len(rows))
+	for _, row := range rows {
+		names = append(names, row.Name)
+	}
+	return names
+}
+
+func equalStringSlices(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func detailFieldValue(fields []kube.DetailField, name string) string {
 	for _, field := range fields {
 		if field.Name == name {
@@ -782,6 +919,12 @@ func TestAssetEndpoints(t *testing.T) {
 			path:        "/assets/README.txt",
 			contentType: "text/plain",
 			body:        "Generated frontend bundles",
+		},
+		{
+			name:        "bundled datastar asset",
+			path:        "/assets/datastar.js",
+			contentType: "text/javascript",
+			body:        "Datastar v1.0.2",
 		},
 	}
 

@@ -223,6 +223,24 @@ function eventElement(event: Event): Element | null {
   return event.target instanceof Element ? event.target : null;
 }
 
+function isEditableShortcutTarget(target: Element | null): boolean {
+  if (!target) {
+    return false;
+  }
+  if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) {
+    return true;
+  }
+  return Boolean(target.closest("[contenteditable=''], [contenteditable='true']"));
+}
+
+function focusSearchInput() {
+  const query = document.querySelector<HTMLInputElement>("#query");
+  if (!query) {
+    return;
+  }
+  query.focus();
+}
+
 function actionItemUrlPatch(actionItem: HTMLElement): UrlStatePatch {
   const context = actionItem.dataset.actionContext || "";
   return {
@@ -593,6 +611,7 @@ document.addEventListener("click", (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
+  const target = eventElement(event);
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
     event.preventDefault();
     openQuickSwitcher();
@@ -633,10 +652,18 @@ document.addEventListener("keydown", (event) => {
       return;
     }
   }
+  if (event.key === "/" && !event.altKey && !event.ctrlKey && !event.metaKey && !isEditableShortcutTarget(target)) {
+    const query = document.querySelector<HTMLInputElement>("#query");
+    if (query) {
+      event.preventDefault();
+      focusSearchInput();
+    }
+    return;
+  }
+
   if (event.key !== "Enter") {
     return;
   }
-  const target = eventElement(event);
   const actionButton = target?.closest<HTMLElement>("[data-action-context]");
   if (actionButton) {
     syncUrlState(actionItemUrlPatch(actionButton), { mode: "push" });

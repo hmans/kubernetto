@@ -76,7 +76,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /ui/selection", s.handleSelection)
 	mux.HandleFunc("GET /ui/detail", s.handleDetail)
 	mux.HandleFunc("GET /ui/charts/prometheus", s.handlePrometheusChart)
-	mux.HandleFunc("POST /ui/prometheus/query-range", s.handlePrometheusQueryRange)
+	mux.Handle("POST /api/", http.StripPrefix("/api", s.apiRoutes()))
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	return withSecurityHeaders(mux)
 }
@@ -159,7 +159,7 @@ func (s *Server) handlePrometheusChart(w http.ResponseWriter, r *http.Request) {
 			Metrics:   unavailableChartMetrics("No Kubernetes client is configured."),
 		}
 		if session != nil && session.store != nil && name != "" {
-			chart = session.store.PodUsageDetailChart(namespace, name, params.Get("cpu"), params.Get("memory"))
+			chart = session.store.PodUsageDetailChart(namespace, name)
 		}
 		sse.PatchElements(ui.RenderFragment(ui.DetailPodUsagePanel(chart)))
 		return
@@ -167,54 +167,9 @@ func (s *Server) handlePrometheusChart(w http.ResponseWriter, r *http.Request) {
 
 	chart := kube.PodUsageOverviewChart{Metrics: unavailableChartMetrics("No Kubernetes client is configured.")}
 	if session != nil && session.store != nil {
-		chart = session.store.PodUsageOverviewChart(params.Get("cpu"), params.Get("memory"), chartLimit(params.Get("limit")))
+		chart = session.store.PodUsageOverviewChart(chartLimit(params.Get("limit")))
 	}
 	sse.PatchElements(ui.RenderFragment(ui.OverviewPodUsagePanel(chart)))
-}
-
-type prometheusQueryRangeRequest struct {
-	Context       string                      `json:"context"`
-	Queries       []kube.PrometheusRangeQuery `json:"queries"`
-	WindowSeconds int                         `json:"windowSeconds"`
-	StepSeconds   int                         `json:"stepSeconds"`
-}
-
-const prometheusQueryRangeMaxQueries = 12
-
-func (s *Server) handlePrometheusQueryRange(w http.ResponseWriter, r *http.Request) {
-	var request prometheusQueryRangeRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64*1024)).Decode(&request); err != nil {
-		writeCompressedJSON(w, r, http.StatusBadRequest, map[string]string{"error": "invalid JSON request body"})
-		return
-	}
-	if len(request.Queries) == 0 {
-		writeCompressedJSON(w, r, http.StatusBadRequest, map[string]string{"error": "at least one PromQL query is required"})
-		return
-	}
-	if len(request.Queries) > prometheusQueryRangeMaxQueries {
-		writeCompressedJSON(w, r, http.StatusBadRequest, map[string]string{"error": "at most twelve PromQL queries can be loaded at once"})
-		return
-	}
-
-	session := s.session(request.Context)
-	if session == nil || session.store == nil {
-		writeCompressedJSON(w, r, http.StatusServiceUnavailable, kube.PrometheusRangeData{
-			Message:   "No Kubernetes client is configured.",
-			Window:    "Last 60 minutes",
-			UpdatedAt: time.Now(),
-		})
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
-	defer cancel()
-	data, err := session.store.PrometheusRangeData(ctx, request.Queries, chartWindow(request.WindowSeconds), chartStep(request.StepSeconds))
-	if err != nil {
-		data.Message = err.Error()
-		writeCompressedJSON(w, r, http.StatusOK, data)
-		return
-	}
-	writeCompressedJSON(w, r, http.StatusOK, data)
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
@@ -826,7 +781,7 @@ func (s *Server) table(kind kube.ResourceKind, namespace, query, sortColumn, sor
 		if session.store == nil {
 			continue
 		}
-		table := session.store.TableWithSort(kind, namespace, "", "", "")
+		table := session.store.TableWithSort(kind, namespace, query, "", "")
 		if len(out.Columns) == 0 && len(table.Columns) > 0 {
 			out.Columns = append([]string{"Cluster"}, table.Columns...)
 		}
@@ -843,7 +798,6 @@ func (s *Server) table(kind kube.ResourceKind, namespace, query, sortColumn, sor
 	if len(out.Columns) == 0 {
 		out.Columns = append([]string{"Cluster"}, kube.Table{Kind: kind}.Columns...)
 	}
-	kube.FilterTableRows(&out, query)
 	kube.SortTableRows(&out, sortColumn, sortOrder)
 	out.Error = strings.Join(errors, "\n")
 	return out
@@ -1110,7 +1064,7 @@ func withSecurityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-eval' https://cdn.jsdelivr.net; style-src 'self'; font-src 'self'; connect-src 'self' https://cdn.jsdelivr.net; img-src 'self' data:")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-eval'; style-src 'self'; font-src 'self'; connect-src 'self'; img-src 'self' data:")
 		next.ServeHTTP(w, r)
 	})
 }

@@ -2,6 +2,7 @@ package kube
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -97,6 +98,40 @@ func TestPrometheusSampleParsesFractionalTimestamp(t *testing.T) {
 	}
 	if sample.Value != 1.25 {
 		t.Fatalf("value = %f", sample.Value)
+	}
+}
+
+func TestPodUsageRangeQueriesBuildPreparedPromQL(t *testing.T) {
+	queries := podUsageRangeQueries([]PodUsageQueryPod{
+		{Namespace: "prod", Pod: "api"},
+		{Namespace: "prod", Pod: "worker.1"},
+		{Namespace: "prod", Pod: "api"},
+		{Namespace: "qa", Pod: `job"quoted`},
+	})
+
+	if len(queries) != 2 {
+		t.Fatalf("queries = %d, want 2: %#v", len(queries), queries)
+	}
+	if queries[0].Name != "cpu" || queries[1].Name != "memory" {
+		t.Fatalf("query names = %#v", queries)
+	}
+	for _, want := range []string{
+		`container_cpu_usage_seconds_total{namespace="prod",pod=~"api|worker\\.1",container!="",image!=""}`,
+		`container_cpu_usage_seconds_total{namespace="qa",pod=~"job\"quoted",container!="",image!=""}`,
+		`container_memory_working_set_bytes{namespace="prod",pod=~"api|worker\\.1",container!="",image!=""}`,
+		`container_memory_working_set_bytes{namespace="qa",pod=~"job\"quoted",container!="",image!=""}`,
+	} {
+		found := queries[0].Query + "\n" + queries[1].Query
+		if !strings.Contains(found, want) {
+			t.Fatalf("prepared queries did not contain %q:\n%s", want, found)
+		}
+	}
+}
+
+func TestReadLimitedPrometheusResponseRejectsOversizedBody(t *testing.T) {
+	_, err := readLimitedPrometheusResponse(strings.NewReader(strings.Repeat("a", prometheusMaxResponseBytes+1)))
+	if err == nil {
+		t.Fatalf("expected oversized response error")
 	}
 }
 

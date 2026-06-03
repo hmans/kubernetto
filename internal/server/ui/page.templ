@@ -9,7 +9,7 @@ templ Page(state PageState) {
 			<title>Kubernetto</title>
 			<script type="module" src="/assets/dist/app.js"></script>
 			<link rel="stylesheet" href="/assets/dist/app.css"/>
-			<script type="module" src="https://cdn.jsdelivr.net/gh/starfederation/datastar@v1.0.2/bundles/datastar.js"></script>
+			<script type="module" src="/assets/datastar.js"></script>
 		</head>
 		<body>
 			<div id="page-progress" class="page-progress" aria-hidden="true" { progressAttrs()... }></div>
@@ -63,8 +63,7 @@ templ SummarySlotView(state PageState) {
 templ ResourceControlsView(state PageState) {
 	<div id="resource-controls">
 		if !isStandalonePage(state) {
-			<section class="grid items-end gap-2.5 rounded-lg border border-[var(--line)] bg-[var(--panel)] p-3 shadow-[var(--shadow)] grid-cols-[minmax(160px,260px)_minmax(180px,1fr)_auto] max-[860px]:grid-cols-1" aria-label="Table controls">
-				@NamespacePickerView(state)
+			<section class="grid gap-2.5 rounded-lg border border-[var(--line)] bg-[var(--panel)] p-3 shadow-[var(--shadow)]" aria-label="Table search">
 				<div class="grid min-w-0 gap-[5px]">
 					<label class="text-xs text-[var(--muted)]" for="query">Search</label>
 					<input
@@ -76,9 +75,6 @@ templ ResourceControlsView(state PageState) {
 						{ searchInputAttrs()... }
 					/>
 				</div>
-				<button class="icon-button" type="button" title="Refresh" aria-label="Refresh" { refreshButtonAttrs()... }>
-					<span class="icon-[lucide--refresh-cw]" aria-hidden="true"></span>
-				</button>
 			</section>
 		}
 	</div>

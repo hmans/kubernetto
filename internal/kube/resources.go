@@ -1439,12 +1439,7 @@ func matches(row Row, query string) bool {
 	if query == "" {
 		return true
 	}
-	for _, cell := range row.Cells {
-		if strings.Contains(strings.ToLower(cell.Value), query) {
-			return true
-		}
-	}
-	return false
+	return strings.Contains(strings.ToLower(row.Name), query)
 }
 
 func FilterTableRows(table *Table, query string) {

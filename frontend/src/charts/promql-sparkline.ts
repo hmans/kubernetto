@@ -84,8 +84,6 @@ export class KubernettoPromqlSparkline extends HTMLElement {
         context: this.getAttribute("cluster-context") || "",
         namespace: this.getAttribute("pod-namespace") || "",
         pod: this.getAttribute("pod-name") || "",
-        cpuQuery: this.getAttribute("cpu-query") || "",
-        memoryQuery: this.getAttribute("memory-query") || "",
         windowSeconds: sparklineWindowSeconds,
         stepSeconds: sparklineStepSeconds,
       }, this.abortController.signal);
