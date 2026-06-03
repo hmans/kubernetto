@@ -1,0 +1,4 @@
+interface:
+  display_name: "Datastar"
+  short_description: "Repo patterns for Datastar + templ SSE"
+  default_prompt: "Use $datastar to update Kubernetto Datastar signals, SSE patches, or loading states."
