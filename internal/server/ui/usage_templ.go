@@ -552,9 +552,9 @@ func PodUsageSparklineCell(row kube.Row, state PageState) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var27 string
-		templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.ResolveAttributeValue(state.Signals.Context)
+		templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.ResolveAttributeValue(sparklineContext(row, state))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `usage.templ`, Line: 128, Col: 42}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `usage.templ`, Line: 128, Col: 49}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var27)
 		if templ_7745c5c3_Err != nil {

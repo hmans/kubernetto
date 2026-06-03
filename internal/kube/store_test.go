@@ -206,25 +206,28 @@ func TestResourceStoreReadsFromInformerCache(t *testing.T) {
 	if deployments.Error != "" {
 		t.Fatalf("deployments error = %q", deployments.Error)
 	}
-	if want := []string{"Name", "Namespace", "Ready", "Up-to-date", "Available", "CPU", "CPU Req", "CPU Limit", "MEM", "MEM Req", "MEM Limit", "Age"}; !equalStrings(deployments.Columns, want) {
+	if want := []string{"Name", "Namespace", "Replicas", "CPU", "CPU Req", "CPU Limit", "MEM", "MEM Req", "MEM Limit", "Age"}; !equalStrings(deployments.Columns, want) {
 		t.Fatalf("deployment columns = %#v, want %#v", deployments.Columns, want)
 	}
-	if got, want := deployments.Rows[0].Cells[5].Value, "37m"; got != want {
+	if got, want := deployments.Rows[0].Cells[2].Value, "2/2 ready"; got != want {
+		t.Fatalf("deployment replicas = %q, want %q", got, want)
+	}
+	if got, want := deployments.Rows[0].Cells[3].Value, "37m"; got != want {
 		t.Fatalf("deployment cpu = %q, want %q", got, want)
 	}
-	if got, want := deployments.Rows[0].Cells[6].Value, "100m"; got != want {
+	if got, want := deployments.Rows[0].Cells[4].Value, "100m"; got != want {
 		t.Fatalf("deployment cpu request = %q, want %q", got, want)
 	}
-	if got, want := deployments.Rows[0].Cells[7].Value, "500m"; got != want {
+	if got, want := deployments.Rows[0].Cells[5].Value, "500m"; got != want {
 		t.Fatalf("deployment cpu limit = %q, want %q", got, want)
 	}
-	if got, want := deployments.Rows[0].Cells[8].Value, "214Mi"; got != want {
+	if got, want := deployments.Rows[0].Cells[6].Value, "214Mi"; got != want {
 		t.Fatalf("deployment mem = %q, want %q", got, want)
 	}
-	if got, want := deployments.Rows[0].Cells[9].Value, "128Mi"; got != want {
+	if got, want := deployments.Rows[0].Cells[7].Value, "128Mi"; got != want {
 		t.Fatalf("deployment mem request = %q, want %q", got, want)
 	}
-	if got, want := deployments.Rows[0].Cells[10].Value, "256Mi"; got != want {
+	if got, want := deployments.Rows[0].Cells[8].Value, "256Mi"; got != want {
 		t.Fatalf("deployment mem limit = %q, want %q", got, want)
 	}
 }

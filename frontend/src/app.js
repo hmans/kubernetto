@@ -4,6 +4,7 @@ const themeKey = "kubernetto-theme";
 const themeOptions = new Set(["auto", "light", "dark"]);
 const urlStateKeys = [
   "context",
+  "clusters",
   "resource",
   "namespace",
   "query",
@@ -15,6 +16,7 @@ const urlStateKeys = [
 ];
 const defaultUrlState = {
   context: "",
+  clusters: "",
   resource: "overview",
   namespace: "",
   query: "",
@@ -613,7 +615,8 @@ function readDOMState() {
   const context = document.querySelector("#context");
   const namespace = document.querySelector("#namespace");
   const query = document.querySelector("#query");
-  const activeResource = document.querySelector("[data-resource-kind][aria-pressed='true']");
+  const clusters = activeClusterSelection();
+  const activeResource = activeResourceButton();
   const activeSort = document.querySelector("th[aria-sort='ascending'] [data-sort-column], th[aria-sort='descending'] [data-sort-column]");
   const selectedRow = document.querySelector("tr[data-selected='true'][data-row-name]");
   const activeDetailMode = document.querySelector("[data-detail-mode][aria-selected='true']");
@@ -629,6 +632,9 @@ function readDOMState() {
   if (query) {
     state.query = query.value;
   }
+  if (clusters !== null) {
+    state.clusters = clusters;
+  }
   if (activeResource) {
     state.resource = activeResource.dataset.resourceKind || "";
   }
@@ -642,12 +648,43 @@ function readDOMState() {
   if (selectedRow) {
     state.selectedName = selectedRow.dataset.rowName || "";
     state.selectedNamespace = selectedRow.dataset.rowNamespace || "";
+    if (selectedRow.dataset.rowCluster) {
+      state.context = selectedRow.dataset.rowCluster;
+    }
   }
   if (activeDetailMode) {
     state.detailMode = activeDetailMode.dataset.detailMode || "overview";
   }
 
   return normalizeUrlState(state);
+}
+
+function activeClusterSelection() {
+  const buttons = Array.from(document.querySelectorAll("[data-cluster-context]"));
+  if (!buttons.length) {
+    return null;
+  }
+  const active = buttons
+    .filter((button) => button.getAttribute("aria-pressed") === "true")
+    .map((button) => button.dataset.clusterContext || "")
+    .filter(Boolean);
+  return clusterSelectionUrlValue(active.join(","));
+}
+
+function activeResourceButton() {
+  return document.querySelector(".resource-child-button[data-resource-kind][aria-pressed='true']")
+    || document.querySelector(".resource-group-button[data-resource-kind][aria-pressed='true']");
+}
+
+function clusterSelectionUrlValue(value) {
+  const selected = String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (!selected.length) {
+    return "";
+  }
+  return selected.join(",");
 }
 
 function normalizeUrlState(state) {
@@ -788,6 +825,17 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  const clusterButton = event.target.closest("[data-cluster-context]");
+  if (clusterButton) {
+    syncUrlState({
+      clusters: clusterSelectionUrlValue(clusterButton.dataset.clusterSelection || ""),
+      selectedName: "",
+      selectedNamespace: "",
+      detailMode: "overview",
+    }, { mode: "push" });
+    return;
+  }
+
   const sortButton = event.target.closest("[data-sort-column]");
   if (sortButton) {
     syncUrlState({
@@ -801,11 +849,15 @@ document.addEventListener("click", (event) => {
 
   const row = event.target.closest("tr[data-row-name]");
   if (row) {
-    syncUrlState({
+    const patch = {
       selectedName: row.dataset.rowName || "",
       selectedNamespace: row.dataset.rowNamespace || "",
       detailMode: "overview",
-    }, { mode: "push" });
+    };
+    if (row.dataset.rowCluster) {
+      patch.context = row.dataset.rowCluster;
+    }
+    syncUrlState(patch, { mode: "push" });
     return;
   }
 
@@ -831,11 +883,15 @@ document.addEventListener("keydown", (event) => {
   if (!row) {
     return;
   }
-  syncUrlState({
+  const patch = {
     selectedName: row.dataset.rowName || "",
     selectedNamespace: row.dataset.rowNamespace || "",
     detailMode: "overview",
-  }, { mode: "push" });
+  };
+  if (row.dataset.rowCluster) {
+    patch.context = row.dataset.rowCluster;
+  }
+  syncUrlState(patch, { mode: "push" });
 });
 
 document.addEventListener("change", (event) => {

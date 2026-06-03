@@ -188,6 +188,50 @@ select {
   color: var(--accent-2);
 }
 
+.cluster-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.cluster-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 32px;
+  max-width: min(280px, 100%);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--muted);
+  padding: 6px 10px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 680;
+  cursor: pointer;
+  box-shadow: var(--shadow);
+}
+
+.cluster-filter span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cluster-filter:hover {
+  border-color: var(--accent);
+  color: var(--accent-2);
+}
+
+.cluster-filter.active {
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--line));
+  background: var(--status-neutral-bg);
+  color: var(--accent-2);
+}
+
 .nav-icon {
   width: 17px;
   height: 17px;
@@ -790,6 +834,16 @@ tbody tr:focus-visible td {
 
 tbody tr[data-selected="true"] td {
   background: var(--status-neutral-bg);
+}
+
+tbody tr.terminal-success td {
+  opacity: .52;
+}
+
+tbody tr.terminal-success:hover td,
+tbody tr.terminal-success:focus-visible td,
+tbody tr.terminal-success[data-selected="true"] td {
+  opacity: .86;
 }
 
 tbody tr:hover .primary,

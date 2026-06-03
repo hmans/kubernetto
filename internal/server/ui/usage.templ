@@ -125,7 +125,7 @@ templ PodUsageSparklineCell(row kube.Row, state PageState) {
 	<td class="sparkline-cell">
 		<kubernetto-promql-sparkline
 			data-ignore-morph
-			cluster-context={ state.Signals.Context }
+			cluster-context={ sparklineContext(row, state) }
 			pod-namespace={ row.Namespace }
 			pod-name={ row.Name }
 			cpu-query={ kube.PodCPUQueryFor(row.Namespace, row.Name) }
