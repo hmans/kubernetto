@@ -37,6 +37,26 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend assets
+        run: pnpm build:assets
+
+      - name: Test frontend assets
+        run: pnpm test:assets
+
       - name: Generate code
         run: go generate ./...
 
