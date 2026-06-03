@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -579,8 +578,8 @@ func TestHandleIndexRendersLazyOverviewChartShell(t *testing.T) {
 	if !strings.Contains(body, `/ui/charts/prometheus`) {
 		t.Fatalf("index did not render pod usage lazy-load action")
 	}
-	if !strings.Contains(body, `cpu=`) || !strings.Contains(body, `memory=`) {
-		t.Fatalf("index did not render PromQL query parameters")
+	if strings.Contains(body, `cpu=`) || strings.Contains(body, `memory=`) {
+		t.Fatalf("index rendered PromQL query parameters")
 	}
 	if !strings.Contains(body, `data-on-intersect__once=`) {
 		t.Fatalf("index did not render chart viewport-load hook")
@@ -607,12 +606,13 @@ func TestPodTableRendersLazySparklineCells(t *testing.T) {
 		`cluster-context="test"`,
 		`pod-namespace="default"`,
 		`pod-name="api"`,
-		`cpu-query=`,
-		`memory-query=`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("pod table did not render lazy sparkline marker %q: %s", want, body)
 		}
+	}
+	if strings.Contains(body, `cpu-query=`) || strings.Contains(body, `memory-query=`) {
+		t.Fatalf("pod table rendered PromQL sparkline attributes: %s", body)
 	}
 }
 
@@ -649,8 +649,6 @@ func TestChartEndpointsRenderPatchFragments(t *testing.T) {
 		"panel":     {"pod-usage-detail"},
 		"namespace": {"prod"},
 		"name":      {"api"},
-		"cpu":       {kube.PodCPUQueryFor("prod", "api")},
-		"memory":    {kube.PodMemoryQueryFor("prod", "api")},
 	}
 	tests := []struct {
 		path string
@@ -677,10 +675,10 @@ func TestChartEndpointsRenderPatchFragments(t *testing.T) {
 	}
 }
 
-func TestPrometheusQueryRangeEndpointReturnsCompressedJSON(t *testing.T) {
+func TestPrometheusPodUsageRangeEndpointReturnsCompressedJSON(t *testing.T) {
 	app := New(nil, context.Background(), nil)
-	requestBody := `{"queries":[{"name":"cpu","query":` + strconv.Quote(kube.PodCPUQuery()) + `}]}`
-	req := httptest.NewRequest(http.MethodPost, "/ui/prometheus/query-range", strings.NewReader(requestBody))
+	requestBody := `{"pods":[{"namespace":"default","pod":"api"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/prometheus/pod-usage-range", strings.NewReader(requestBody))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept-Encoding", "gzip")
 	res := httptest.NewRecorder()
@@ -716,9 +714,9 @@ func TestPrometheusQueryRangeEndpointReturnsCompressedJSON(t *testing.T) {
 	}
 }
 
-func TestPrometheusQueryRangeEndpointRejectsGenericPromQL(t *testing.T) {
+func TestPrometheusPodUsageRangeEndpointRequiresPods(t *testing.T) {
 	app := New(nil, context.Background(), nil)
-	req := httptest.NewRequest(http.MethodPost, "/ui/prometheus/query-range", strings.NewReader(`{"queries":[{"name":"cpu","query":"up"}]}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/prometheus/pod-usage-range", strings.NewReader(`{"queries":[{"name":"cpu","query":"up"}]}`))
 	req.Header.Set("Content-Type", "application/json")
 	res := httptest.NewRecorder()
 
@@ -727,8 +725,21 @@ func TestPrometheusQueryRangeEndpointRejectsGenericPromQL(t *testing.T) {
 	if res.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", res.Code, http.StatusBadRequest)
 	}
-	if body := res.Body.String(); !strings.Contains(body, "not an allowed pod usage query") {
-		t.Fatalf("body did not contain validation error: %s", body)
+	if body := res.Body.String(); !strings.Contains(body, "at least one pod is required") {
+		t.Fatalf("body did not contain pod validation error: %s", body)
+	}
+}
+
+func TestPrometheusQueryRangeEndpointIsNotRegistered(t *testing.T) {
+	app := New(nil, context.Background(), nil)
+	req := httptest.NewRequest(http.MethodPost, "/ui/prometheus/query-range", strings.NewReader(`{"queries":[{"name":"cpu","query":"up"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	res := httptest.NewRecorder()
+
+	app.Routes().ServeHTTP(res, req)
+
+	if res.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want %d", res.Code, http.StatusMethodNotAllowed)
 	}
 }
 

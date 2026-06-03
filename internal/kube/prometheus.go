@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -16,12 +17,9 @@ import (
 )
 
 const (
-	usageMetricsWindow          = 60 * time.Minute
-	prometheusStep              = 60 * time.Second
-	prometheusMaxQueryLength    = 4096
-	prometheusMaxResponseBytes  = 4 * 1024 * 1024
-	prometheusCPUUsageMetric    = "container_cpu_usage_seconds_total"
-	prometheusMemoryUsageMetric = "container_memory_working_set_bytes"
+	usageMetricsWindow         = 60 * time.Minute
+	prometheusStep             = 60 * time.Second
+	prometheusMaxResponseBytes = 4 * 1024 * 1024
 )
 
 type prometheusTarget struct {
@@ -53,6 +51,11 @@ type prometheusSample struct {
 type PrometheusRangeQuery struct {
 	Name  string `json:"name"`
 	Query string `json:"query"`
+}
+
+type PodUsageQueryPod struct {
+	Namespace string `json:"namespace"`
+	Pod       string `json:"pod"`
 }
 
 type PrometheusRangeData struct {
@@ -132,44 +135,26 @@ func (s *ResourceStore) PrometheusRangeData(ctx context.Context, queries []Prome
 	return out, errors.New("Prometheus range queries returned no usable target")
 }
 
-func ValidatePrometheusRangeQueries(queries []PrometheusRangeQuery) error {
-	for _, query := range queries {
-		value := strings.TrimSpace(query.Query)
-		if value == "" {
-			return errors.New("PromQL query cannot be empty")
-		}
-		if len(value) > prometheusMaxQueryLength {
-			return fmt.Errorf("PromQL query %q is too long", query.Name)
-		}
-		if !isAllowedPodUsageQuery(value) {
-			return fmt.Errorf("PromQL query %q is not an allowed pod usage query", query.Name)
-		}
-	}
-	return nil
+func (s *ResourceStore) PrometheusPodUsageRangeData(ctx context.Context, pods []PodUsageQueryPod, window, step time.Duration) (PrometheusRangeData, error) {
+	return s.PrometheusRangeData(ctx, podUsageRangeQueries(pods), window, step)
 }
 
-func (s *ResourceStore) loadPrometheusTimelines(ctx context.Context, cpuQuery, memoryQuery string) (map[string][]UsageSample, prometheusTarget, error) {
+func (s *ResourceStore) loadPrometheusTimelines(ctx context.Context) (map[string][]UsageSample, prometheusTarget, error) {
 	targets := prometheusTargets(s.listServices(""))
 	if len(targets) == 0 {
 		return nil, prometheusTarget{}, errors.New("no Prometheus-looking services found")
-	}
-	if cpuQuery == "" {
-		cpuQuery = podCPUQuery
-	}
-	if memoryQuery == "" {
-		memoryQuery = podMemoryQuery
 	}
 
 	end := time.Now()
 	start := end.Add(-usageMetricsWindow)
 	var lastErr error
 	for _, target := range targets {
-		cpuSeries, err := s.queryPrometheusRange(ctx, target, cpuQuery, start, end, prometheusStep)
+		cpuSeries, err := s.queryPrometheusRange(ctx, target, podCPUQuery, start, end, prometheusStep)
 		if err != nil {
 			lastErr = err
 			continue
 		}
-		memorySeries, err := s.queryPrometheusRange(ctx, target, memoryQuery, start, end, prometheusStep)
+		memorySeries, err := s.queryPrometheusRange(ctx, target, podMemoryQuery, start, end, prometheusStep)
 		if err != nil {
 			lastErr = err
 			continue
@@ -193,11 +178,11 @@ func (s *ResourceStore) loadPrometheusPodTimeline(ctx context.Context, namespace
 
 // PodUsageDetailChart loads chart data on demand. Resource detail rendering
 // deliberately does not call this so historical metrics stay lazy.
-func (s *ResourceStore) PodUsageDetailChart(namespace, name, cpuQuery, memoryQuery string) PodUsageDetailChart {
+func (s *ResourceStore) PodUsageDetailChart(namespace, name string) PodUsageDetailChart {
 	chart := PodUsageDetailChart{Name: name, Namespace: namespace}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	timelines, target, err := s.loadPrometheusTimelinesForQueries(ctx, normalizedPodCPUQuery(namespace, name, cpuQuery), normalizedPodMemoryQuery(namespace, name, memoryQuery))
+	timelines, target, err := s.loadPrometheusTimelinesForQueries(ctx, podCPUQueryFor(namespace, name), podMemoryQueryFor(namespace, name))
 	timeline := timelines[podKey(namespace, name)]
 	if err == nil && len(timeline) > 0 {
 		chart.Metrics = MetricsState{
@@ -272,20 +257,11 @@ func (s *ResourceStore) loadPrometheusTimelinesForQueries(ctx context.Context, c
 const podCPUQuery = `sum by (namespace, pod) (rate(container_cpu_usage_seconds_total{pod!="",container!="",image!=""}[5m]))`
 const podMemoryQuery = `sum by (namespace, pod) (container_memory_working_set_bytes{pod!="",container!="",image!=""})`
 
-func PodCPUQuery() string {
-	return podCPUQuery
-}
-
-func PodMemoryQuery() string {
-	return podMemoryQuery
-}
-
-func PodCPUQueryFor(namespace, pod string) string {
-	return podCPUQueryFor(namespace, pod)
-}
-
-func PodMemoryQueryFor(namespace, pod string) string {
-	return podMemoryQueryFor(namespace, pod)
+func podUsageRangeQueries(pods []PodUsageQueryPod) []PrometheusRangeQuery {
+	return []PrometheusRangeQuery{
+		{Name: "cpu", Query: podCPUQueryForPods(pods)},
+		{Name: "memory", Query: podMemoryQueryForPods(pods)},
+	}
 }
 
 func podCPUQueryFor(namespace, pod string) string {
@@ -296,78 +272,54 @@ func podMemoryQueryFor(namespace, pod string) string {
 	return `sum by (namespace, pod) (container_memory_working_set_bytes{namespace=` + strconv.Quote(namespace) + `,pod=` + strconv.Quote(pod) + `,container!="",image!=""})`
 }
 
-func isAllowedPodUsageQuery(query string) bool {
-	if query == podCPUQuery || query == podMemoryQuery {
-		return true
+func podCPUQueryForPods(pods []PodUsageQueryPod) string {
+	if len(pods) == 0 {
+		return podCPUQuery
 	}
-	if isAllowedPodBatchQuery(query, prometheusCPUUsageMetric, true) {
-		return true
-	}
-	return isAllowedPodBatchQuery(query, prometheusMemoryUsageMetric, false)
+	return `sum by (namespace, pod) (` + strings.Join(podUsageSelectors(pods, "container_cpu_usage_seconds_total", true), " or ") + `)`
 }
 
-func isAllowedPodBatchQuery(query, metric string, rate bool) bool {
-	const prefix = "sum by (namespace, pod) ("
-	if !strings.HasPrefix(query, prefix) || !strings.HasSuffix(query, ")") {
-		return false
+func podMemoryQueryForPods(pods []PodUsageQueryPod) string {
+	if len(pods) == 0 {
+		return podMemoryQuery
 	}
-	inner := strings.TrimSuffix(strings.TrimPrefix(query, prefix), ")")
-	parts := strings.Split(inner, " or ")
-	for _, part := range parts {
-		if !isAllowedPodSelector(part, metric, rate) {
-			return false
-		}
-	}
-	return len(parts) > 0
+	return `sum by (namespace, pod) (` + strings.Join(podUsageSelectors(pods, "container_memory_working_set_bytes", false), " or ") + `)`
 }
 
-func isAllowedPodSelector(part, metric string, rate bool) bool {
-	if rate {
-		if !strings.HasPrefix(part, "rate(") || !strings.HasSuffix(part, "[5m])") {
-			return false
+func podUsageSelectors(pods []PodUsageQueryPod, metric string, rate bool) []string {
+	podsByNamespace := map[string]map[string]struct{}{}
+	for _, pod := range pods {
+		namespace := strings.TrimSpace(pod.Namespace)
+		name := strings.TrimSpace(pod.Pod)
+		if namespace == "" || name == "" {
+			continue
 		}
-		part = strings.TrimSuffix(strings.TrimPrefix(part, "rate("), "[5m])")
+		if podsByNamespace[namespace] == nil {
+			podsByNamespace[namespace] = map[string]struct{}{}
+		}
+		podsByNamespace[namespace][name] = struct{}{}
 	}
-	prefix := metric + "{"
-	if !strings.HasPrefix(part, prefix) || !strings.HasSuffix(part, "}") {
-		return false
-	}
-	selector := strings.TrimSuffix(strings.TrimPrefix(part, prefix), "}")
-	if selector == `pod!="",container!="",image!=""` {
-		return true
-	}
-	if !strings.HasPrefix(selector, `namespace="`) {
-		return false
-	}
-	rest, ok := consumeQuotedSelector(selector[len(`namespace="`):])
-	if !ok || !strings.HasPrefix(rest, `,pod`) {
-		return false
-	}
-	rest = rest[len(`,pod`):]
-	if strings.HasPrefix(rest, `="`) {
-		rest = rest[len(`="`):]
-	} else if strings.HasPrefix(rest, `=~"`) {
-		rest = rest[len(`=~"`):]
-	} else {
-		return false
-	}
-	rest, ok = consumeQuotedSelector(rest)
-	return ok && rest == `,container!="",image!=""`
-}
 
-func consumeQuotedSelector(value string) (string, bool) {
-	escaped := false
-	for index, r := range value {
-		switch {
-		case escaped:
-			escaped = false
-		case r == '\\':
-			escaped = true
-		case r == '"':
-			return value[index+1:], true
-		}
+	namespaces := make([]string, 0, len(podsByNamespace))
+	for namespace := range podsByNamespace {
+		namespaces = append(namespaces, namespace)
 	}
-	return "", false
+	sort.Strings(namespaces)
+
+	selectors := make([]string, 0, len(namespaces))
+	for _, namespace := range namespaces {
+		podNames := make([]string, 0, len(podsByNamespace[namespace]))
+		for name := range podsByNamespace[namespace] {
+			podNames = append(podNames, regexp.QuoteMeta(name))
+		}
+		sort.Strings(podNames)
+		selector := metric + `{namespace=` + strconv.Quote(namespace) + `,pod=~` + strconv.Quote(strings.Join(podNames, "|")) + `,container!="",image!=""}`
+		if rate {
+			selector = `rate(` + selector + `[5m])`
+		}
+		selectors = append(selectors, selector)
+	}
+	return selectors
 }
 
 func prometheusRangeSeries(name string, series []prometheusSeries) []PrometheusRangeSeries {
@@ -408,20 +360,6 @@ func usageWindowLabel(window time.Duration) string {
 		return fmt.Sprintf("Last %d minutes", minutes)
 	}
 	return "Last " + window.Round(time.Second).String()
-}
-
-func normalizedPodCPUQuery(namespace, pod, query string) string {
-	if query != "" {
-		return query
-	}
-	return podCPUQueryFor(namespace, pod)
-}
-
-func normalizedPodMemoryQuery(namespace, pod, query string) string {
-	if query != "" {
-		return query
-	}
-	return podMemoryQueryFor(namespace, pod)
 }
 
 func prometheusTargets(services []*corev1.Service) []prometheusTarget {

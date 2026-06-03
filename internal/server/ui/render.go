@@ -394,8 +394,6 @@ func overviewPodUsageLoadAttrs() templ.Attributes {
 	return prometheusChartLoadAttrs(url.Values{
 		"panel":  {"pod-usage-overview"},
 		"limit":  {"8"},
-		"cpu":    {kube.PodCPUQuery()},
-		"memory": {kube.PodMemoryQuery()},
 	})
 }
 
@@ -404,8 +402,6 @@ func detailPodUsageLoadAttrs(namespace, name string) templ.Attributes {
 		"panel":     {"pod-usage-detail"},
 		"namespace": {namespace},
 		"name":      {name},
-		"cpu":       {kube.PodCPUQueryFor(namespace, name)},
-		"memory":    {kube.PodMemoryQueryFor(namespace, name)},
 	})
 }
 
