@@ -275,6 +275,23 @@ const dustShader = {
   `,
 };
 
+const warningDeformSnippet = `
+float warningPhase = warningSeedValue * 37.17;
+vec3 warningSeedVector = normalize(vec3(
+  fract(warningSeedValue * 12.9898) - 0.5,
+  fract(warningSeedValue * 78.233) - 0.5,
+  fract(warningSeedValue * 45.164) - 0.5
+) + vec3(0.12, 0.28, 0.44));
+vec3 warningDirection = normalize(position + normal * (0.34 + warningSeedValue * 0.28) + warningSeedVector * 0.18);
+float warningWave = sin(warningTime * (4.3 + warningSeedValue * 1.8) + warningPhase + dot(warningDirection, vec3(13.0, 7.0, 17.0)));
+float warningShard = sin(warningTime * (3.0 + warningSeedValue * 1.4) + warningPhase + warningDirection.x * 23.0)
+  * sin(warningTime * (3.9 + warningSeedValue * 1.1) + warningDirection.y * 19.0)
+  * sin(warningTime * (4.5 + warningSeedValue * 1.6) + warningDirection.z * 29.0);
+float warningSpike = smoothstep(0.58, 0.98, warningWave * 0.5 + 0.5) * 0.34
+  + smoothstep(0.42, 0.92, warningShard * 0.5 + 0.5) * 0.26;
+transformed += warningDirection * warningSpike;
+transformed += normal * sin(warningTime * (7.0 + warningSeedValue * 4.0) + warningPhase + length(position.xyz) * 31.0) * 0.04;`;
+
 class ClusterMapController {
   private viewport: HTMLElement;
   private tooltip: HTMLElement | null;
@@ -1163,6 +1180,7 @@ class ClusterMapController {
         }
       }
       this.updateWarningShaderTime(elapsed);
+      this.updateSelectionShaderTime(elapsed);
       this.updateTrafficBeamTime(elapsed);
       this.updateParticleFlowTime(elapsed);
       this.updateDust(elapsed);
@@ -1184,6 +1202,26 @@ class ClusterMapController {
     if (uniform) {
       uniform.value = elapsed;
     }
+  }
+
+  private updateSelectionShaderTime(elapsed: number) {
+    if (!this.selectionEffect) {
+      return;
+    }
+    this.selectionEffect.traverse((object) => {
+      const material = (object as THREE.Mesh).material as THREE.Material | THREE.Material[] | undefined;
+      const materials = Array.isArray(material) ? material : material ? [material] : [];
+      for (const item of materials) {
+        const warningShader = item.userData.warningShader as { uniforms?: { warningTime?: { value: number } } } | undefined;
+        const spotlightShader = item.userData.spotlightShader as { uniforms?: { spotlightTime?: { value: number } } } | undefined;
+        if (warningShader?.uniforms?.warningTime) {
+          warningShader.uniforms.warningTime.value = elapsed;
+        }
+        if (spotlightShader?.uniforms?.spotlightTime) {
+          spotlightShader.uniforms.spotlightTime.value = elapsed;
+        }
+      }
+    });
   }
 
   private updateTrafficBeamTime(elapsed: number) {
@@ -2361,22 +2399,9 @@ varying float vWarningSeed;`,
         .replace(
           "#include <begin_vertex>",
           `vec3 transformed = vec3(position);
-vWarningSeed = warningSeed;
-float warningPhase = warningSeed * 37.17;
-vec3 warningSeedVector = normalize(vec3(
-  fract(warningSeed * 12.9898) - 0.5,
-  fract(warningSeed * 78.233) - 0.5,
-  fract(warningSeed * 45.164) - 0.5
-) + vec3(0.12, 0.28, 0.44));
-vec3 warningDirection = normalize(position + normal * (0.34 + warningSeed * 0.28) + warningSeedVector * 0.18);
-float warningWave = sin(warningTime * (4.3 + warningSeed * 1.8) + warningPhase + dot(warningDirection, vec3(13.0, 7.0, 17.0)));
-float warningShard = sin(warningTime * (3.0 + warningSeed * 1.4) + warningPhase + warningDirection.x * 23.0)
-  * sin(warningTime * (3.9 + warningSeed * 1.1) + warningDirection.y * 19.0)
-  * sin(warningTime * (4.5 + warningSeed * 1.6) + warningDirection.z * 29.0);
-float warningSpike = smoothstep(0.58, 0.98, warningWave * 0.5 + 0.5) * 0.34
-  + smoothstep(0.42, 0.92, warningShard * 0.5 + 0.5) * 0.26;
-transformed += warningDirection * warningSpike;
-transformed += normal * sin(warningTime * (7.0 + warningSeed * 4.0) + warningPhase + length(position.xyz) * 31.0) * 0.04;`,
+float warningSeedValue = warningSeed;
+vWarningSeed = warningSeedValue;
+${warningDeformSnippet}`,
         );
       shader.fragmentShader = shader.fragmentShader
         .replace(
@@ -2452,6 +2477,17 @@ function createDustGeometry() {
 function selectionEffectFor(item: MapLayoutItem) {
   const color = colorFor(item.statusKey, item.type);
   const group = new THREE.Group();
+  group.add(...selectionSpotlightFor(item));
+  if (item.type === "warning") {
+    const glow = new THREE.Mesh(selectionEffectGeometry(item), warningSelectionMaterial(item, color, false));
+    glow.scale.setScalar(1.08);
+    glow.renderOrder = 96;
+    const outline = new THREE.Mesh(selectionEffectGeometry(item), warningSelectionMaterial(item, 0xfff1c4, true));
+    outline.renderOrder = 98;
+    group.add(glow, outline);
+    group.userData.selectionEffect = true;
+    return group;
+  }
   const wireMaterial = new THREE.LineBasicMaterial({
     color: 0x9fffe8,
     transparent: true,
@@ -2482,6 +2518,144 @@ function selectionEffectFor(item: MapLayoutItem) {
   group.add(outline);
   group.userData.selectionEffect = true;
   return group;
+}
+
+function selectionSpotlightFor(item: MapLayoutItem) {
+  const radius = THREE.MathUtils.clamp(item.size * 1.35, 1.1, 5.4);
+  const height = THREE.MathUtils.clamp(item.size * 4.4, 8.5, 20);
+  const bottomRadius = radius * 1.18;
+  const topRadius = radius * 0.22;
+  const beamGeometry = new THREE.CylinderGeometry(topRadius, bottomRadius, height, 32, 1, true);
+  const beam = new THREE.Mesh(beamGeometry, spotlightBeamMaterial(topRadius, bottomRadius));
+  beam.position.y = height * 0.5 + Math.max(0.4, item.size * 0.18);
+  beam.renderOrder = 94;
+  beam.userData.excludeFromBokehDepth = true;
+
+  const haloGeometry = new THREE.CircleGeometry(bottomRadius * 1.1, 48);
+  const halo = new THREE.Mesh(haloGeometry, spotlightHaloMaterial());
+  halo.rotation.x = -Math.PI / 2;
+  halo.position.y = 0.035;
+  halo.renderOrder = 95;
+  halo.userData.excludeFromBokehDepth = true;
+  return [beam, halo];
+}
+
+function spotlightBeamMaterial(topRadius: number, bottomRadius: number) {
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      spotlightTime: { value: 0 },
+      topRadius: { value: topRadius },
+      bottomRadius: { value: bottomRadius },
+    },
+    vertexShader: `
+      varying vec3 vSpotPosition;
+      varying vec2 vSpotUv;
+      void main() {
+        vSpotPosition = position;
+        vSpotUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform float spotlightTime;
+      uniform float topRadius;
+      uniform float bottomRadius;
+      varying vec3 vSpotPosition;
+      varying vec2 vSpotUv;
+      void main() {
+        float localRadius = mix(bottomRadius, topRadius, vSpotUv.y);
+        float radial = length(vSpotPosition.xz) / max(localRadius, 0.001);
+        float edge = 1.0 - smoothstep(0.36, 1.0, radial);
+        float vertical = smoothstep(0.0, 0.22, vSpotUv.y) * (1.0 - smoothstep(0.86, 1.0, vSpotUv.y));
+        float scan = sin(vSpotUv.y * 28.0 - spotlightTime * 1.7) * 0.035;
+        float alpha = max(0.0, edge * vertical * (0.18 + scan));
+        vec3 color = mix(vec3(0.52, 1.0, 0.9), vec3(0.98, 1.0, 0.88), edge);
+        gl_FragColor = vec4(color, alpha);
+      }
+    `,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending,
+  });
+  material.userData.spotlightShader = material;
+  return material;
+}
+
+function spotlightHaloMaterial() {
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      spotlightTime: { value: 0 },
+    },
+    vertexShader: `
+      varying vec2 vSpotUv;
+      void main() {
+        vSpotUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform float spotlightTime;
+      varying vec2 vSpotUv;
+      void main() {
+        vec2 point = vSpotUv - vec2(0.5);
+        float radial = length(point) * 2.0;
+        float core = 1.0 - smoothstep(0.0, 0.46, radial);
+        float ring = 1.0 - smoothstep(0.68, 1.0, radial);
+        float pulse = sin(spotlightTime * 1.8) * 0.025;
+        float alpha = (core * 0.16 + ring * 0.08 + pulse) * (1.0 - smoothstep(0.92, 1.0, radial));
+        gl_FragColor = vec4(0.72, 1.0, 0.9, max(alpha, 0.0));
+      }
+    `,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    blending: THREE.AdditiveBlending,
+  });
+  material.userData.spotlightShader = material;
+  return material;
+}
+
+function warningSelectionMaterial(item: MapLayoutItem, color: number, wireframe: boolean) {
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      warningTime: { value: 0 },
+      warningSeed: { value: seededUnitValue(item.id) },
+      warningColor: { value: new THREE.Color(color) },
+      warningOpacity: { value: wireframe ? 0.96 : 0.13 },
+    },
+    vertexShader: `
+      uniform float warningTime;
+      uniform float warningSeed;
+      varying float vWarningPulse;
+      void main() {
+        vec3 transformed = vec3(position);
+        float warningSeedValue = warningSeed;
+        ${warningDeformSnippet}
+        vWarningPulse = warningSpike;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(transformed, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 warningColor;
+      uniform float warningOpacity;
+      varying float vWarningPulse;
+      void main() {
+        vec3 hot = mix(warningColor, vec3(1.0, 0.92, 0.68), clamp(vWarningPulse, 0.0, 1.0) * 0.45);
+        gl_FragColor = vec4(hot, warningOpacity);
+      }
+    `,
+    wireframe,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+  });
+  material.userData.warningShader = material;
+  return material;
 }
 
 function selectionGlowFor(item: MapLayoutItem, geometry: THREE.BufferGeometry, material: THREE.Material) {
