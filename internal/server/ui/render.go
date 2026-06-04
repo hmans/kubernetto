@@ -24,6 +24,7 @@ type PageState struct {
 	Clusters       []*kube.Cluster
 	ActiveContexts []string
 	Resources      []kube.ResourceDef
+	QuickItems     []QuickSwitcherItem
 	Signals        Signals
 	Summary        kube.Summary
 	Fleet          FleetOverview
@@ -86,6 +87,31 @@ type ActionItem struct {
 	TargetNamespace string
 	ActionLabel     string
 	LastSeen        time.Time
+}
+
+type QuickSwitcherItem struct {
+	Label             string
+	Meta              string
+	MetaTokens        []QuickSwitcherMetaToken
+	KindLabel         string
+	Icon              string
+	Search            string
+	Context           string
+	Clusters          string
+	Resource          string
+	Namespace         string
+	Query             string
+	SortColumn        string
+	SortOrder         string
+	SelectedName      string
+	SelectedNamespace string
+	DetailMode        string
+	Endpoint          string
+}
+
+type QuickSwitcherMetaToken struct {
+	Label string
+	Icon  string
 }
 
 type ResourceNavGroup struct {
@@ -225,10 +251,10 @@ func tableAutoRefreshAttrs(state PageState) templ.Attributes {
 		return attrs
 	}
 	if isActionItems(state) {
-		attrs["data-on-interval__duration.10s"] = "@get('/ui/table')"
+		attrs["data-on-interval__duration.10s"] = "@get('/ui/table?refresh=auto')"
 		return attrs
 	}
-	attrs["data-on-interval__duration.5s"] = "@get('/ui/table')"
+	attrs["data-on-interval__duration.5s"] = "@get('/ui/table?refresh=auto')"
 	return attrs
 }
 
@@ -320,6 +346,10 @@ func resourceButtonIconClass(kind kube.ResourceKind) string {
 	default:
 		return "icon-[uil--servers]"
 	}
+}
+
+func ResourceIconClass(kind kube.ResourceKind) string {
+	return resourceButtonIconClass(kind)
 }
 
 func resourceGroupIconClass(group ResourceNavGroup) string {
@@ -447,8 +477,6 @@ func overviewPodUsageLoadAttrs() templ.Attributes {
 	return prometheusChartLoadAttrs(url.Values{
 		"panel":  {"pod-usage-overview"},
 		"limit":  {"8"},
-		"cpu":    {kube.PodCPUQuery()},
-		"memory": {kube.PodMemoryQuery()},
 	})
 }
 
@@ -457,8 +485,6 @@ func detailPodUsageLoadAttrs(namespace, name string) templ.Attributes {
 		"panel":     {"pod-usage-detail"},
 		"namespace": {namespace},
 		"name":      {name},
-		"cpu":       {kube.PodCPUQueryFor(namespace, name)},
-		"memory":    {kube.PodMemoryQueryFor(namespace, name)},
 	})
 }
 
@@ -935,4 +961,367 @@ func resourceDef(kind kube.ResourceKind) kube.ResourceDef {
 		}
 	}
 	return kube.ResourceDefs[0]
+}
+
+func quickSwitcherItems(state PageState) []QuickSwitcherItem {
+	items := []QuickSwitcherItem{}
+	items = append(items, quickSwitcherViewItems(state)...)
+	items = append(items, quickSwitcherClusterItems(state)...)
+	items = append(items, quickSwitcherNamespaceItems(state)...)
+	items = append(items, quickSwitcherActionItems(state)...)
+	if len(state.QuickItems) > 0 {
+		items = append(items, state.QuickItems...)
+	} else {
+		items = append(items, quickSwitcherRowItems(state)...)
+	}
+	return items
+}
+
+func quickSwitcherViewItems(state PageState) []QuickSwitcherItem {
+	items := make([]QuickSwitcherItem, 0, len(state.Resources))
+	for _, def := range state.Resources {
+		if def.Kind == "" {
+			continue
+		}
+		endpoint := "/ui/table"
+		namespace := state.Signals.Namespace
+		if def.Scope == "cluster" || def.Kind == kube.KindOverview || def.Kind == kube.KindActions {
+			namespace = ""
+		}
+		if def.Kind == kube.KindOverview {
+			endpoint = "/ui/refresh"
+		}
+		items = append(items, QuickSwitcherItem{
+			Label:      def.Label,
+			Meta:       resourceQuickSwitcherMeta(def),
+			MetaTokens: resourceQuickSwitcherMetaTokens(def),
+			KindLabel:  "View",
+			Icon:       resourceButtonIconClass(def.Kind),
+			Context:    state.Signals.Context,
+			Clusters:   state.Signals.Clusters,
+			Resource:   string(def.Kind),
+			Namespace:  namespace,
+			DetailMode: "overview",
+			Endpoint:   endpoint,
+		})
+	}
+	return items
+}
+
+func quickSwitcherClusterItems(state PageState) []QuickSwitcherItem {
+	items := []QuickSwitcherItem{}
+	for _, cluster := range state.Clusters {
+		if cluster == nil || cluster.ContextName == "" {
+			continue
+		}
+		label := cluster.ContextName
+		meta := "Cluster"
+		if cluster.Current {
+			meta = "Current cluster"
+		}
+		items = append(items, QuickSwitcherItem{
+			Label:      label,
+			Meta:       meta,
+			MetaTokens: []QuickSwitcherMetaToken{{Label: meta, Icon: "icon-[lucide--server]"}},
+			KindLabel:  "Cluster",
+			Icon:       "icon-[lucide--server]",
+			Context:    cluster.ContextName,
+			Clusters:   cluster.ContextName,
+			Resource:   string(kube.KindOverview),
+			DetailMode: "overview",
+			Endpoint:   "/ui/refresh",
+		})
+	}
+	return items
+}
+
+func quickSwitcherNamespaceItems(state PageState) []QuickSwitcherItem {
+	if len(state.Namespaces) == 0 {
+		return nil
+	}
+	resource := kube.NormalizeKind(state.Signals.Resource)
+	def := resourceDef(resource)
+	if def.Scope != "namespaced" || resource == kube.KindActions {
+		resource = kube.KindPods
+	}
+	items := make([]QuickSwitcherItem, 0, len(state.Namespaces))
+	for _, namespace := range state.Namespaces {
+		if namespace == "" {
+			continue
+		}
+		items = append(items, QuickSwitcherItem{
+			Label:      namespace,
+			Meta:       "Namespace",
+			MetaTokens: []QuickSwitcherMetaToken{{Label: "Namespace", Icon: resourceButtonIconClass(kube.KindNamespaces)}},
+			KindLabel:  "Namespace",
+			Icon:       "icon-[lucide--folder]",
+			Search:     strings.ToLower(namespace + " namespace"),
+			Context:    state.Signals.Context,
+			Clusters:   state.Signals.Clusters,
+			Resource:   string(resource),
+			Namespace:  namespace,
+			DetailMode: "overview",
+			Endpoint:   "/ui/table",
+		})
+	}
+	return items
+}
+
+func quickSwitcherActionItems(state PageState) []QuickSwitcherItem {
+	items := make([]QuickSwitcherItem, 0, len(state.Actions.Items))
+	for _, item := range state.Actions.Items {
+		endpoint := "/ui/table"
+		if item.TargetKind == kube.KindOverview {
+			endpoint = "/ui/refresh"
+		}
+		items = append(items, QuickSwitcherItem{
+			Label:             item.Title,
+			Meta:              quickSwitcherActionMeta(item),
+			MetaTokens:        quickSwitcherActionMetaTokens(item),
+			KindLabel:         "Issue",
+			Icon:              "icon-[lucide--circle-alert]",
+			Context:           item.Context,
+			Clusters:          item.Context,
+			Resource:          string(item.TargetKind),
+			Query:             item.TargetQuery,
+			SelectedName:      item.TargetName,
+			SelectedNamespace: item.TargetNamespace,
+			DetailMode:        "overview",
+			Endpoint:          endpoint,
+		})
+	}
+	return items
+}
+
+func quickSwitcherRowItems(state PageState) []QuickSwitcherItem {
+	if isStandalonePage(state) || len(state.Table.Rows) == 0 {
+		return nil
+	}
+	const limit = 80
+	items := make([]QuickSwitcherItem, 0, minInt(len(state.Table.Rows), limit))
+	for index, row := range state.Table.Rows {
+		if index >= limit {
+			break
+		}
+		contextName := state.Signals.Context
+		if row.Cluster != "" {
+			contextName = row.Cluster
+		}
+		items = append(items, QuickSwitcherItem{
+			Label:             row.Name,
+			Meta:              quickSwitcherRowMeta(row, state),
+			MetaTokens:        quickSwitcherRowMetaTokens(row, state),
+			KindLabel:         state.Table.Label,
+			Icon:              resourceButtonIconClass(state.Table.Kind),
+			Context:           contextName,
+			Clusters:          state.Signals.Clusters,
+			Resource:          string(state.Table.Kind),
+			Namespace:         state.Table.Namespace,
+			Query:             state.Signals.Query,
+			SortColumn:        state.Signals.SortColumn,
+			SortOrder:         state.Signals.SortOrder,
+			SelectedName:      row.Name,
+			SelectedNamespace: row.Namespace,
+			DetailMode:        "overview",
+			Endpoint:          "/ui/selection",
+		})
+	}
+	return items
+}
+
+func quickSwitcherItemAttrs(item QuickSwitcherItem, index int) templ.Attributes {
+	attrs := templ.Attributes{
+		"type":                          "button",
+		"role":                          "option",
+		"class":                         "quick-switcher-result",
+		"tabindex":                      "-1",
+		"data-quick-result":             true,
+		"data-quick-index":              strconv.Itoa(index),
+		"data-quick-label":              item.Label,
+		"data-quick-meta":               item.Meta,
+		"data-quick-kind":               item.KindLabel,
+		"data-quick-search":             quickSwitcherSearchText(item),
+		"data-quick-context":            item.Context,
+		"data-quick-clusters":           item.Clusters,
+		"data-quick-resource":           item.Resource,
+		"data-quick-namespace":          item.Namespace,
+		"data-quick-query":              item.Query,
+		"data-quick-sort-column":        item.SortColumn,
+		"data-quick-sort-order":         item.SortOrder,
+		"data-quick-selected-name":      item.SelectedName,
+		"data-quick-selected-namespace": item.SelectedNamespace,
+		"data-quick-detail-mode":        item.DetailMode,
+		"data-indicator:loading":        true,
+		"data-on:click":                 quickSwitcherClickExpression(item),
+		"aria-selected":                 "false",
+	}
+	if item.Resource != "" {
+		attrs["data-resource-kind"] = item.Resource
+		attrs["data-resource-scope"] = resourceDef(kube.NormalizeKind(item.Resource)).Scope
+	}
+	return attrs
+}
+
+func quickSwitcherClickExpression(item QuickSwitcherItem) string {
+	endpoint := item.Endpoint
+	if endpoint == "" {
+		endpoint = "/ui/table"
+	}
+	return "$context = " + signalLiteral(item.Context) +
+		"; $clusters = " + signalLiteral(item.Clusters) +
+		"; $resource = " + signalLiteral(item.Resource) +
+		"; $namespace = " + signalLiteral(item.Namespace) +
+		"; $query = " + signalLiteral(item.Query) +
+		"; $sortColumn = " + signalLiteral(item.SortColumn) +
+		"; $sortOrder = " + signalLiteral(item.SortOrder) +
+		"; $selectedName = " + signalLiteral(item.SelectedName) +
+		"; $selectedNamespace = " + signalLiteral(item.SelectedNamespace) +
+		"; $detailMode = " + signalLiteral(firstNonEmptyString(item.DetailMode, "overview")) +
+		"; @get('" + endpoint + "')"
+}
+
+func resourceQuickSwitcherMeta(def kube.ResourceDef) string {
+	if def.Kind == kube.KindOverview {
+		return "Dashboard"
+	}
+	if def.Kind == kube.KindActions {
+		return "Current issues"
+	}
+	if def.Scope == "cluster" {
+		return "Cluster-scoped resource"
+	}
+	return "Namespaced resource"
+}
+
+func resourceQuickSwitcherMetaTokens(def kube.ResourceDef) []QuickSwitcherMetaToken {
+	return []QuickSwitcherMetaToken{{
+		Label: resourceQuickSwitcherMeta(def),
+		Icon:  quickSwitcherMetaIconForResourceDef(def),
+	}}
+}
+
+func quickSwitcherMetaIconForResourceDef(def kube.ResourceDef) string {
+	if def.Kind == kube.KindOverview || def.Kind == kube.KindActions {
+		return resourceButtonIconClass(def.Kind)
+	}
+	if def.Scope == "cluster" {
+		return "icon-[lucide--server]"
+	}
+	return resourceButtonIconClass(kube.KindNamespaces)
+}
+
+func quickSwitcherActionMeta(item ActionItem) string {
+	parts := []string{}
+	if item.Context != "" {
+		parts = append(parts, item.Context)
+	}
+	if item.Detail != "" {
+		parts = append(parts, item.Detail)
+	}
+	if item.ActionLabel != "" {
+		parts = append(parts, item.ActionLabel)
+	}
+	return strings.Join(parts, " · ")
+}
+
+func quickSwitcherActionMetaTokens(item ActionItem) []QuickSwitcherMetaToken {
+	tokens := []QuickSwitcherMetaToken{}
+	if item.Context != "" {
+		tokens = append(tokens, QuickSwitcherMetaToken{Label: item.Context, Icon: "icon-[lucide--server]"})
+	}
+	if item.Detail != "" {
+		tokens = append(tokens, QuickSwitcherMetaToken{Label: item.Detail, Icon: "icon-[lucide--info]"})
+	}
+	if item.ActionLabel != "" {
+		tokens = append(tokens, QuickSwitcherMetaToken{Label: item.ActionLabel, Icon: "icon-[lucide--circle-alert]"})
+	}
+	return tokens
+}
+
+func quickSwitcherRowMeta(row kube.Row, state PageState) string {
+	parts := []string{state.Table.Label}
+	if row.Namespace != "" {
+		parts = append(parts, row.Namespace)
+	}
+	if row.Cluster != "" {
+		parts = append(parts, row.Cluster)
+	}
+	if row.Status != "" {
+		parts = append(parts, row.Status)
+	}
+	return strings.Join(parts, " · ")
+}
+
+func quickSwitcherRowMetaTokens(row kube.Row, state PageState) []QuickSwitcherMetaToken {
+	tokens := []QuickSwitcherMetaToken{{
+		Label: state.Table.Label,
+		Icon:  resourceButtonIconClass(state.Table.Kind),
+	}}
+	if row.Namespace != "" {
+		tokens = append(tokens, QuickSwitcherMetaToken{Label: row.Namespace, Icon: resourceButtonIconClass(kube.KindNamespaces)})
+	}
+	if row.Cluster != "" {
+		tokens = append(tokens, QuickSwitcherMetaToken{Label: row.Cluster, Icon: "icon-[lucide--server]"})
+	}
+	if row.Status != "" {
+		tokens = append(tokens, QuickSwitcherMetaToken{Label: row.Status, Icon: quickSwitcherStatusIcon(row.Status)})
+	}
+	return tokens
+}
+
+func quickSwitcherMetaTokens(item QuickSwitcherItem) []QuickSwitcherMetaToken {
+	if len(item.MetaTokens) > 0 {
+		return item.MetaTokens
+	}
+	if item.Meta == "" {
+		return nil
+	}
+	return []QuickSwitcherMetaToken{{Label: item.Meta, Icon: "icon-[lucide--info]"}}
+}
+
+func quickSwitcherStatusIcon(status string) string {
+	switch strings.ToLower(status) {
+	case "running", "active", "bound", "ready", "true", "succeeded", "complete":
+		return "icon-[lucide--circle-check]"
+	case "pending", "progressing", "terminating":
+		return "icon-[lucide--loader]"
+	case "failed", "error", "crashloopbackoff":
+		return "icon-[lucide--circle-alert]"
+	default:
+		return "icon-[lucide--activity]"
+	}
+}
+
+func quickSwitcherSearchText(item QuickSwitcherItem) string {
+	if item.Search != "" {
+		return item.Search
+	}
+	return strings.ToLower(strings.Join([]string{
+		item.Label,
+		item.Meta,
+		item.KindLabel,
+		item.Context,
+		item.Clusters,
+		item.Resource,
+		item.Namespace,
+		item.Query,
+		item.SelectedName,
+		item.SelectedNamespace,
+	}, " "))
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }

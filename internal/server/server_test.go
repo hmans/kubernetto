@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -213,7 +212,7 @@ func TestHandleIndexRendersActionItemsPage(t *testing.T) {
 		`data-action-selected-name="worker-event"`,
 		`data-action-selected-namespace="default"`,
 		`$selectedName = &#34;worker-event&#34;`,
-		`data-on-interval__duration.10s="@get(&#39;/ui/table&#39;)"`,
+		`data-on-interval__duration.10s="@get(&#39;/ui/table?refresh=auto&#39;)"`,
 		`Nodes ready 0/1`,
 		`Pods healthy 0/1`,
 	} {
@@ -339,9 +338,13 @@ func TestActionItemsIgnoreSucceededPods(t *testing.T) {
 	if !strings.Contains(body, "No current issues") {
 		t.Fatalf("action items page did not render empty state: %s", body)
 	}
+	content := body
+	if _, after, ok := strings.Cut(body, `id="content-grid"`); ok {
+		content = after
+	}
 	for _, unwanted := range []string{"Pods healthy", "completed-job", "Open pods"} {
-		if strings.Contains(body, unwanted) {
-			t.Fatalf("action items page rendered non-actionable succeeded pod marker %q: %s", unwanted, body)
+		if strings.Contains(content, unwanted) {
+			t.Fatalf("action items page rendered non-actionable succeeded pod marker %q: %s", unwanted, content)
 		}
 	}
 }
@@ -380,6 +383,39 @@ func TestHandleIndexRendersGroupedResourceNav(t *testing.T) {
 	}
 }
 
+func TestHandleIndexRendersQuickSwitcher(t *testing.T) {
+	app := New([]*kube.Cluster{
+		testClusterWithObjects("prod", testPod("api", corev1.PodRunning)),
+	}, context.Background(), nil)
+	req := httptest.NewRequest("GET", "/", nil)
+	res := httptest.NewRecorder()
+
+	app.handleIndex(res, req)
+
+	body := res.Body.String()
+	for _, want := range []string{
+		`id="quick-switcher"`,
+		`data-quick-switcher`,
+		`data-quick-open`,
+		`aria-label="Find anything"`,
+		`placeholder="Find anything"`,
+		`data-quick-result`,
+		`data-quick-resource="pods"`,
+		`data-quick-selected-name="api"`,
+		`data-quick-context="prod"`,
+		`Pods · default · Running`,
+		`quick-switcher-meta-token`,
+		`quick-switcher-meta-icon icon-[uil--cube]`,
+		`quick-switcher-meta-icon icon-[uil--folder-network]`,
+		`quick-switcher-meta-icon icon-[lucide--circle-check]`,
+		`data-on:click="$context = &#34;prod&#34;`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("quick switcher did not render %q: %s", want, body)
+		}
+	}
+}
+
 func TestHandleIndexOmitsClusterSummaryOnResourcePages(t *testing.T) {
 	app := New([]*kube.Cluster{testCluster()}, context.Background(), nil)
 	req := httptest.NewRequest(http.MethodGet, "/?resource=pods", nil)
@@ -394,7 +430,7 @@ func TestHandleIndexOmitsClusterSummaryOnResourcePages(t *testing.T) {
 	if strings.Contains(body, `data-on-interval__duration.5s="@get(&#39;/ui/summary&#39;)"`) {
 		t.Fatalf("resource page rendered summary auto-refresh interval")
 	}
-	if !strings.Contains(body, `data-on-interval__duration.5s="@get(&#39;/ui/table&#39;)"`) {
+	if !strings.Contains(body, `data-on-interval__duration.5s="@get(&#39;/ui/table?refresh=auto&#39;)"`) {
 		t.Fatalf("resource page did not keep table auto-refresh interval")
 	}
 }
@@ -459,6 +495,22 @@ func TestHandleTablePatchesPageChromeForNavigation(t *testing.T) {
 		if strings.Contains(body, unwanted) {
 			t.Fatalf("table navigation response patched removed control %q:\n%s", unwanted, body)
 		}
+	}
+}
+
+func TestHandleTableSkipsQuickSwitcherForAutoRefresh(t *testing.T) {
+	app := New([]*kube.Cluster{testCluster()}, context.Background(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/ui/table?resource=deployments&refresh=auto", nil)
+	res := httptest.NewRecorder()
+
+	app.handleTable(res, req)
+
+	body := res.Body.String()
+	if strings.Contains(body, `id="quick-switcher"`) {
+		t.Fatalf("auto-refresh table response patched quick switcher:\n%s", body)
+	}
+	if !strings.Contains(body, `id="content-grid"`) {
+		t.Fatalf("auto-refresh table response did not patch content:\n%s", body)
 	}
 }
 
@@ -638,7 +690,7 @@ func TestHandleIndexRendersTableAutoRefresh(t *testing.T) {
 	if !strings.Contains(body, `id="content-grid"`) {
 		t.Fatalf("index did not render content grid")
 	}
-	if !strings.Contains(body, `data-on-interval__duration.5s="@get(&#39;/ui/table&#39;)"`) {
+	if !strings.Contains(body, `data-on-interval__duration.5s="@get(&#39;/ui/table?refresh=auto&#39;)"`) {
 		t.Fatalf("index did not render table auto-refresh interval")
 	}
 	if !strings.Contains(body, `data-class:pending="$loading"`) || !strings.Contains(body, `data-show="$loading"`) {
@@ -654,7 +706,7 @@ func TestHandleIndexDoesNotAutoRefreshOverviewAsTable(t *testing.T) {
 	app.handleIndex(res, req)
 
 	body := res.Body.String()
-	if strings.Contains(body, `data-on-interval__duration.5s="@get(&#39;/ui/table&#39;)"`) {
+	if strings.Contains(body, `data-on-interval__duration.5s="@get(&#39;/ui/table?refresh=auto&#39;)"`) {
 		t.Fatalf("index rendered table auto-refresh interval on overview")
 	}
 }
@@ -673,8 +725,8 @@ func TestHandleIndexRendersLazyOverviewChartShell(t *testing.T) {
 	if !strings.Contains(body, `/ui/charts/prometheus`) {
 		t.Fatalf("index did not render pod usage lazy-load action")
 	}
-	if !strings.Contains(body, `cpu=`) || !strings.Contains(body, `memory=`) {
-		t.Fatalf("index did not render PromQL query parameters")
+	if strings.Contains(body, `cpu=`) || strings.Contains(body, `memory=`) {
+		t.Fatalf("index rendered PromQL query parameters")
 	}
 	if !strings.Contains(body, `data-on-intersect__once=`) {
 		t.Fatalf("index did not render chart viewport-load hook")
@@ -701,12 +753,13 @@ func TestPodTableRendersLazySparklineCells(t *testing.T) {
 		`cluster-context="test"`,
 		`pod-namespace="default"`,
 		`pod-name="api"`,
-		`cpu-query=`,
-		`memory-query=`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("pod table did not render lazy sparkline marker %q: %s", want, body)
 		}
+	}
+	if strings.Contains(body, `cpu-query=`) || strings.Contains(body, `memory-query=`) {
+		t.Fatalf("pod table rendered PromQL sparkline attributes: %s", body)
 	}
 }
 
@@ -743,8 +796,6 @@ func TestChartEndpointsRenderPatchFragments(t *testing.T) {
 		"panel":     {"pod-usage-detail"},
 		"namespace": {"prod"},
 		"name":      {"api"},
-		"cpu":       {kube.PodCPUQueryFor("prod", "api")},
-		"memory":    {kube.PodMemoryQueryFor("prod", "api")},
 	}
 	tests := []struct {
 		path string
@@ -771,10 +822,10 @@ func TestChartEndpointsRenderPatchFragments(t *testing.T) {
 	}
 }
 
-func TestPrometheusQueryRangeEndpointReturnsCompressedJSON(t *testing.T) {
+func TestPrometheusPodUsageRangeEndpointReturnsCompressedJSON(t *testing.T) {
 	app := New(nil, context.Background(), nil)
-	requestBody := `{"queries":[{"name":"cpu","query":` + strconv.Quote(kube.PodCPUQuery()) + `}]}`
-	req := httptest.NewRequest(http.MethodPost, "/ui/prometheus/query-range", strings.NewReader(requestBody))
+	requestBody := `{"pods":[{"namespace":"default","pod":"api"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/prometheus/pod-usage-range", strings.NewReader(requestBody))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept-Encoding", "gzip")
 	res := httptest.NewRecorder()
@@ -810,9 +861,9 @@ func TestPrometheusQueryRangeEndpointReturnsCompressedJSON(t *testing.T) {
 	}
 }
 
-func TestPrometheusQueryRangeEndpointRejectsGenericPromQL(t *testing.T) {
+func TestPrometheusPodUsageRangeEndpointRequiresPods(t *testing.T) {
 	app := New(nil, context.Background(), nil)
-	req := httptest.NewRequest(http.MethodPost, "/ui/prometheus/query-range", strings.NewReader(`{"queries":[{"name":"cpu","query":"up"}]}`))
+	req := httptest.NewRequest(http.MethodPost, "/api/prometheus/pod-usage-range", strings.NewReader(`{"queries":[{"name":"cpu","query":"up"}]}`))
 	req.Header.Set("Content-Type", "application/json")
 	res := httptest.NewRecorder()
 
@@ -821,8 +872,21 @@ func TestPrometheusQueryRangeEndpointRejectsGenericPromQL(t *testing.T) {
 	if res.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", res.Code, http.StatusBadRequest)
 	}
-	if body := res.Body.String(); !strings.Contains(body, "not an allowed pod usage query") {
-		t.Fatalf("body did not contain validation error: %s", body)
+	if body := res.Body.String(); !strings.Contains(body, "at least one pod is required") {
+		t.Fatalf("body did not contain pod validation error: %s", body)
+	}
+}
+
+func TestPrometheusQueryRangeEndpointIsNotRegistered(t *testing.T) {
+	app := New(nil, context.Background(), nil)
+	req := httptest.NewRequest(http.MethodPost, "/ui/prometheus/query-range", strings.NewReader(`{"queries":[{"name":"cpu","query":"up"}]}`))
+	req.Header.Set("Content-Type", "application/json")
+	res := httptest.NewRecorder()
+
+	app.Routes().ServeHTTP(res, req)
+
+	if res.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want %d", res.Code, http.StatusMethodNotAllowed)
 	}
 }
 

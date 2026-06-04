@@ -77,7 +77,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /ui/detail", s.handleDetail)
 	mux.HandleFunc("GET /ui/map-data", s.handleMapData)
 	mux.HandleFunc("GET /ui/charts/prometheus", s.handlePrometheusChart)
-	mux.HandleFunc("POST /ui/prometheus/query-range", s.handlePrometheusQueryRange)
+	mux.Handle("POST /api/", http.StripPrefix("/api", s.apiRoutes()))
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	return withSecurityHeaders(mux)
 }
@@ -95,6 +95,9 @@ func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
 	state := s.state(signals)
 	sse := datastar.NewSSE(w, r)
 	s.patchSignals(sse, state.Signals)
+	if r.URL.Query().Get("refresh") != "auto" {
+		s.patchElements(sse, "quick switcher", ui.RenderFragment(ui.QuickSwitcherView(state)))
+	}
 	s.patchElements(sse, "page title", ui.RenderFragment(ui.PageTitleView(state)))
 	s.patchElements(sse, "resource nav", ui.RenderFragment(ui.ResourceNavView(state)))
 	s.patchElements(sse, "summary slot", ui.RenderFragment(ui.SummarySlotView(state)))
@@ -115,6 +118,9 @@ func (s *Server) handleTable(w http.ResponseWriter, r *http.Request) {
 	state := s.state(signals)
 	sse := datastar.NewSSE(w, r)
 	s.patchSignals(sse, state.Signals)
+	if r.URL.Query().Get("refresh") != "auto" {
+		s.patchElements(sse, "quick switcher", ui.RenderFragment(ui.QuickSwitcherView(state)))
+	}
 	s.patchElements(sse, "page title", ui.RenderFragment(ui.PageTitleView(state)))
 	s.patchElements(sse, "resource nav", ui.RenderFragment(ui.ResourceNavView(state)))
 	s.patchElements(sse, "summary slot", ui.RenderFragment(ui.SummarySlotView(state)))
@@ -127,6 +133,7 @@ func (s *Server) handleSelection(w http.ResponseWriter, r *http.Request) {
 	state := s.state(signals)
 	sse := datastar.NewSSE(w, r)
 	s.patchSignals(sse, state.Signals)
+	s.patchElements(sse, "quick switcher", ui.RenderFragment(ui.QuickSwitcherView(state)))
 	s.patchElements(sse, "content", ui.RenderFragment(ui.ContentView(state)))
 }
 
@@ -176,7 +183,7 @@ func (s *Server) handlePrometheusChart(w http.ResponseWriter, r *http.Request) {
 			Metrics:   unavailableChartMetrics("No Kubernetes client is configured."),
 		}
 		if session != nil && session.store != nil && name != "" {
-			chart = session.store.PodUsageDetailChart(namespace, name, "", "")
+			chart = session.store.PodUsageDetailChart(namespace, name)
 		}
 		sse.PatchElements(ui.RenderFragment(ui.DetailPodUsagePanel(chart)))
 		return
@@ -184,58 +191,9 @@ func (s *Server) handlePrometheusChart(w http.ResponseWriter, r *http.Request) {
 
 	chart := kube.PodUsageOverviewChart{Metrics: unavailableChartMetrics("No Kubernetes client is configured.")}
 	if session != nil && session.store != nil {
-		chart = session.store.PodUsageOverviewChart("", "", chartLimit(params.Get("limit")))
+		chart = session.store.PodUsageOverviewChart(chartLimit(params.Get("limit")))
 	}
 	sse.PatchElements(ui.RenderFragment(ui.OverviewPodUsagePanel(chart)))
-}
-
-type prometheusQueryRangeRequest struct {
-	Context       string                      `json:"context"`
-	Queries       []kube.PrometheusRangeQuery `json:"queries"`
-	WindowSeconds int                         `json:"windowSeconds"`
-	StepSeconds   int                         `json:"stepSeconds"`
-}
-
-const prometheusQueryRangeMaxQueries = 12
-
-func (s *Server) handlePrometheusQueryRange(w http.ResponseWriter, r *http.Request) {
-	var request prometheusQueryRangeRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 64*1024)).Decode(&request); err != nil {
-		writeCompressedJSON(w, r, http.StatusBadRequest, map[string]string{"error": "invalid JSON request body"})
-		return
-	}
-	if len(request.Queries) == 0 {
-		writeCompressedJSON(w, r, http.StatusBadRequest, map[string]string{"error": "at least one PromQL query is required"})
-		return
-	}
-	if len(request.Queries) > prometheusQueryRangeMaxQueries {
-		writeCompressedJSON(w, r, http.StatusBadRequest, map[string]string{"error": "at most twelve PromQL queries can be loaded at once"})
-		return
-	}
-	if err := kube.ValidatePrometheusRangeQueries(request.Queries); err != nil {
-		writeCompressedJSON(w, r, http.StatusBadRequest, map[string]string{"error": err.Error()})
-		return
-	}
-
-	session := s.session(request.Context)
-	if session == nil || session.store == nil {
-		writeCompressedJSON(w, r, http.StatusServiceUnavailable, kube.PrometheusRangeData{
-			Message:   "No Kubernetes client is configured.",
-			Window:    "Last 60 minutes",
-			UpdatedAt: time.Now(),
-		})
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), 6*time.Second)
-	defer cancel()
-	data, err := session.store.PrometheusRangeData(ctx, request.Queries, chartWindow(request.WindowSeconds), chartStep(request.StepSeconds))
-	if err != nil {
-		data.Message = err.Error()
-		writeCompressedJSON(w, r, http.StatusOK, data)
-		return
-	}
-	writeCompressedJSON(w, r, http.StatusOK, data)
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {
@@ -299,6 +257,7 @@ func (s *Server) state(signals ui.Signals) ui.PageState {
 	table := kube.Table{Kind: kind, Label: def.Label, Namespace: namespace, Query: signals.Query, SortColumn: signals.SortColumn, SortOrder: signals.SortOrder, UpdatedAt: time.Now(), Namespaced: def.Scope == "namespaced"}
 	detail := kube.ResourceDetail{Kind: kind, Label: def.Label, Name: signals.SelectedName, Namespace: selectedNamespace}
 	namespaces := []string{}
+	quickItems := []ui.QuickSwitcherItem{}
 	namespaceErr := ""
 
 	if session != nil && session.store != nil {
@@ -315,6 +274,7 @@ func (s *Server) state(signals ui.Signals) ui.PageState {
 		if err != nil {
 			namespaceErr = err.Error()
 		}
+		quickItems = s.quickSwitcherObjectItems(stateQuickSignals(contextName, signals, namespace, table), activeContexts)
 	}
 
 	return ui.PageState{
@@ -322,6 +282,7 @@ func (s *Server) state(signals ui.Signals) ui.PageState {
 		Clusters:       s.clusterList(),
 		ActiveContexts: activeContexts,
 		Resources:      kube.ResourceDefs,
+		QuickItems:     quickItems,
 		Signals:        ui.Signals{Context: contextName, Clusters: signals.Clusters, Resource: string(kind), Namespace: namespace, Query: signals.Query, SortColumn: table.SortColumn, SortOrder: table.SortOrder, SelectedName: signals.SelectedName, SelectedNamespace: selectedNamespace, DetailMode: detailMode},
 		Summary:        summary,
 		Fleet:          fleet,
@@ -331,6 +292,21 @@ func (s *Server) state(signals ui.Signals) ui.PageState {
 		Detail:         detail,
 		Namespaces:     namespaces,
 		NamespaceErr:   namespaceErr,
+	}
+}
+
+func stateQuickSignals(contextName string, signals ui.Signals, namespace string, table kube.Table) ui.Signals {
+	return ui.Signals{
+		Context:           contextName,
+		Clusters:          signals.Clusters,
+		Resource:          string(table.Kind),
+		Namespace:         namespace,
+		Query:             signals.Query,
+		SortColumn:        table.SortColumn,
+		SortOrder:         table.SortOrder,
+		SelectedName:      signals.SelectedName,
+		SelectedNamespace: signals.SelectedNamespace,
+		DetailMode:        signals.DetailMode,
 	}
 }
 
@@ -868,6 +844,121 @@ func (s *Server) table(kind kube.ResourceKind, namespace, query, sortColumn, sor
 	kube.SortTableRows(&out, sortColumn, sortOrder)
 	out.Error = strings.Join(errors, "\n")
 	return out
+}
+
+const (
+	quickSwitcherObjectLimit        = 600
+	quickSwitcherObjectPerKindLimit = 60
+)
+
+func (s *Server) quickSwitcherObjectItems(signals ui.Signals, contexts []string) []ui.QuickSwitcherItem {
+	items := []ui.QuickSwitcherItem{}
+	for _, def := range kube.ResourceDefs {
+		if def.Kind == kube.KindOverview || def.Kind == kube.KindActions {
+			continue
+		}
+		table := s.table(def.Kind, "", "", "", "", contexts)
+		if table.Error != "" {
+			continue
+		}
+		perKind := 0
+		for _, row := range table.Rows {
+			if row.Name == "" {
+				continue
+			}
+			contextName := signals.Context
+			if row.Cluster != "" {
+				contextName = row.Cluster
+			}
+			clusters := signals.Clusters
+			if contextName != "" {
+				clusters = contextName
+			}
+			namespace := ""
+			if table.Namespaced {
+				namespace = row.Namespace
+			}
+			items = append(items, ui.QuickSwitcherItem{
+				Label:             row.Name,
+				Meta:              quickSwitcherObjectMeta(table, row),
+				MetaTokens:        quickSwitcherObjectMetaTokens(table, row),
+				KindLabel:         table.Label,
+				Icon:              ui.ResourceIconClass(table.Kind),
+				Search:            quickSwitcherObjectSearch(table, row),
+				Context:           contextName,
+				Clusters:          clusters,
+				Resource:          string(table.Kind),
+				Namespace:         namespace,
+				SelectedName:      row.Name,
+				SelectedNamespace: row.Namespace,
+				DetailMode:        "overview",
+				Endpoint:          "/ui/table",
+			})
+			perKind++
+			if perKind >= quickSwitcherObjectPerKindLimit || len(items) >= quickSwitcherObjectLimit {
+				break
+			}
+		}
+		if len(items) >= quickSwitcherObjectLimit {
+			break
+		}
+	}
+	return items
+}
+
+func quickSwitcherObjectMeta(table kube.Table, row kube.Row) string {
+	parts := []string{table.Label}
+	if row.Namespace != "" {
+		parts = append(parts, row.Namespace)
+	}
+	if row.Cluster != "" {
+		parts = append(parts, row.Cluster)
+	}
+	if row.Status != "" {
+		parts = append(parts, row.Status)
+	}
+	return strings.Join(parts, " · ")
+}
+
+func quickSwitcherObjectMetaTokens(table kube.Table, row kube.Row) []ui.QuickSwitcherMetaToken {
+	tokens := []ui.QuickSwitcherMetaToken{{
+		Label: table.Label,
+		Icon:  ui.ResourceIconClass(table.Kind),
+	}}
+	if row.Namespace != "" {
+		tokens = append(tokens, ui.QuickSwitcherMetaToken{Label: row.Namespace, Icon: ui.ResourceIconClass(kube.KindNamespaces)})
+	}
+	if row.Cluster != "" {
+		tokens = append(tokens, ui.QuickSwitcherMetaToken{Label: row.Cluster, Icon: "icon-[lucide--server]"})
+	}
+	if row.Status != "" {
+		tokens = append(tokens, ui.QuickSwitcherMetaToken{Label: row.Status, Icon: quickSwitcherObjectStatusIcon(row.Status)})
+	}
+	return tokens
+}
+
+func quickSwitcherObjectStatusIcon(status string) string {
+	switch strings.ToLower(status) {
+	case "running", "active", "bound", "ready", "true", "succeeded", "complete":
+		return "icon-[lucide--circle-check]"
+	case "pending", "progressing", "terminating":
+		return "icon-[lucide--loader]"
+	case "failed", "error", "crashloopbackoff":
+		return "icon-[lucide--circle-alert]"
+	default:
+		return "icon-[lucide--activity]"
+	}
+}
+
+func quickSwitcherObjectSearch(table kube.Table, row kube.Row) string {
+	return strings.ToLower(strings.Join([]string{
+		row.Name,
+		row.Namespace,
+		row.Cluster,
+		row.Status,
+		table.Label,
+		string(table.Kind),
+	}, " "))
 }
 
 func (s *Server) namespaces(contexts []string) ([]string, error) {

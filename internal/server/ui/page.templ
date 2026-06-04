@@ -13,6 +13,7 @@ templ Page(state PageState) {
 		</head>
 		<body>
 			<div id="page-progress" class="page-progress" aria-hidden="true" { progressAttrs()... }></div>
+			@QuickSwitcherView(state)
 			<div class="app min-h-screen grid grid-cols-[248px_minmax(0,1fr)] max-[860px]:grid-cols-1" { appSignalAttrs(state)... }>
 				<aside class="bg-[var(--side-bg)] text-[var(--side-text)] px-4 py-[22px] flex flex-col gap-[22px]">
 					<div class="flex items-center gap-2.5 text-lg font-[760]">
@@ -25,6 +26,11 @@ templ Page(state PageState) {
 					<div class="flex items-center justify-between gap-4 max-[860px]:flex-col max-[860px]:items-start">
 						@PageTitleView(state)
 						<div class="flex flex-wrap items-center justify-end gap-3 max-[860px]:w-full max-[860px]:justify-between">
+							<button class="quick-switcher-trigger" type="button" data-quick-open title="Find anything">
+								<span class="icon-[lucide--search]" aria-hidden="true"></span>
+								<span>Find</span>
+								<kbd>Cmd K</kbd>
+							</button>
 							<div class="updated">Live summary every 5s</div>
 							<div class="inline-grid min-h-[34px] grid-cols-3 gap-0.5 rounded-lg border border-[var(--line)] bg-[var(--panel-2)] p-[3px]" role="group" aria-label="Theme">
 								<button class="min-h-7 min-w-0 cursor-pointer rounded-md border-0 bg-transparent px-[9px] text-[var(--muted)] hover:text-[var(--text-strong)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] [&[aria-pressed=true]]:bg-[var(--panel)] [&[aria-pressed=true]]:text-[var(--text-strong)] [&[aria-pressed=true]]:shadow-[0_1px_2px_rgba(0,0,0,.08)]" type="button" data-theme-option="auto" aria-pressed="true">Auto</button>

@@ -40,6 +40,7 @@ const defaultUrlState: UrlState = {
 let urlSyncTimer = 0;
 let querySyncTimer = 0;
 let restoringHistory = false;
+let quickActiveIndex = 0;
 
 function savedTheme(): string {
   try {
@@ -320,6 +321,184 @@ function applyOptimisticResourceNav(resourceButton: HTMLElement) {
   }
 }
 
+function quickSwitcher(): HTMLElement | null {
+  return document.querySelector<HTMLElement>("[data-quick-switcher]");
+}
+
+function quickInput(): HTMLInputElement | null {
+  return document.querySelector<HTMLInputElement>("[data-quick-input]");
+}
+
+function quickResults(): HTMLElement[] {
+  return Array.from(document.querySelectorAll<HTMLElement>("[data-quick-result]"));
+}
+
+function visibleQuickResults(): HTMLElement[] {
+  return quickResults().filter((result) => !result.hidden);
+}
+
+function quickText(value: string | undefined): string {
+  return String(value || "").trim().toLowerCase();
+}
+
+function quickFieldScore(field: string, term: string, scores: {
+  exact: number;
+  prefix: number;
+  contains: number;
+}): number {
+  if (!field || !term) {
+    return 0;
+  }
+  if (field === term) {
+    return scores.exact;
+  }
+  if (field.startsWith(term)) {
+    return scores.prefix;
+  }
+  if (field.includes(term)) {
+    return scores.contains;
+  }
+  return 0;
+}
+
+function quickMatchScore(result: HTMLElement, terms: string[]): number {
+  if (!terms.length) {
+    return 0;
+  }
+
+  const label = quickText(result.dataset.quickLabel);
+  const meta = quickText(result.dataset.quickMeta);
+  const kind = quickText(result.dataset.quickKind);
+  const context = quickText(result.dataset.quickContext);
+  const clusters = quickText(result.dataset.quickClusters);
+  const resource = quickText(result.dataset.quickResource);
+  const namespace = quickText(result.dataset.quickNamespace);
+  const selectedName = quickText(result.dataset.quickSelectedName);
+  const selectedNamespace = quickText(result.dataset.quickSelectedNamespace);
+  const search = quickText(result.dataset.quickSearch);
+  let total = 0;
+
+  for (const term of terms) {
+    const termScore = Math.max(
+      quickFieldScore(label, term, { exact: 140, prefix: 115, contains: 85 }),
+      quickFieldScore(selectedName, term, { exact: 130, prefix: 110, contains: 80 }),
+      quickFieldScore(namespace, term, { exact: 95, prefix: 75, contains: 45 }),
+      quickFieldScore(selectedNamespace, term, { exact: 90, prefix: 70, contains: 42 }),
+      quickFieldScore(kind, term, { exact: 80, prefix: 62, contains: 38 }),
+      quickFieldScore(resource, term, { exact: 76, prefix: 58, contains: 34 }),
+      quickFieldScore(meta, term, { exact: 44, prefix: 36, contains: 24 }),
+      quickFieldScore(context, term, { exact: 24, prefix: 18, contains: 10 }),
+      quickFieldScore(clusters, term, { exact: 22, prefix: 16, contains: 8 }),
+      search.includes(term) ? 4 : 0,
+    );
+    if (termScore === 0) {
+      return -1;
+    }
+    total += termScore;
+  }
+
+  return total;
+}
+
+function quickResultUrlPatch(result: HTMLElement): UrlStatePatch {
+  return {
+    context: result.dataset.quickContext || "",
+    clusters: result.dataset.quickClusters || "",
+    resource: result.dataset.quickResource || defaultUrlState.resource,
+    namespace: result.dataset.quickNamespace || "",
+    query: result.dataset.quickQuery || "",
+    sortColumn: result.dataset.quickSortColumn || "",
+    sortOrder: result.dataset.quickSortOrder || "",
+    selectedName: result.dataset.quickSelectedName || "",
+    selectedNamespace: result.dataset.quickSelectedNamespace || "",
+    detailMode: result.dataset.quickDetailMode || "overview",
+  };
+}
+
+function setQuickSelected(index: number) {
+  const visible = visibleQuickResults();
+  if (!visible.length) {
+    quickActiveIndex = 0;
+    for (const result of quickResults()) {
+      result.setAttribute("aria-selected", "false");
+    }
+    return;
+  }
+  quickActiveIndex = ((index % visible.length) + visible.length) % visible.length;
+  for (const result of quickResults()) {
+    result.setAttribute("aria-selected", "false");
+  }
+  visible[quickActiveIndex]?.setAttribute("aria-selected", "true");
+  visible[quickActiveIndex]?.scrollIntoView?.({ block: "nearest" });
+}
+
+function updateQuickResults() {
+  const input = quickInput();
+  const container = document.querySelector<HTMLElement>("[data-quick-results]");
+  const terms = String(input?.value || "")
+    .trim()
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+  let visibleCount = 0;
+  const scored = quickResults().map((result, index) => ({
+    result,
+    index,
+    score: quickMatchScore(result, terms),
+  }));
+  const sorted = [...scored].sort((left, right) => {
+    const scoreDelta = right.score - left.score;
+    if (scoreDelta !== 0) {
+      return scoreDelta;
+    }
+    return Number(left.result.dataset.quickIndex || left.index) - Number(right.result.dataset.quickIndex || right.index);
+  });
+
+  for (const item of sorted) {
+    const matched = terms.length === 0 || item.score >= 0;
+    item.result.hidden = !matched;
+    if (matched) {
+      visibleCount += 1;
+    }
+    container?.append(item.result);
+  }
+
+  const count = document.querySelector<HTMLElement>("[data-quick-count]");
+  if (count) {
+    count.textContent = `${visibleCount} result${visibleCount === 1 ? "" : "s"}`;
+  }
+  const empty = document.querySelector<HTMLElement>("[data-quick-empty]");
+  if (empty) {
+    empty.hidden = visibleCount !== 0;
+  }
+  setQuickSelected(0);
+}
+
+function openQuickSwitcher() {
+  const palette = quickSwitcher();
+  const input = quickInput();
+  if (!palette || !input) {
+    return;
+  }
+  palette.hidden = false;
+  input.value = "";
+  updateQuickResults();
+  window.setTimeout(() => input.focus(), 0);
+}
+
+function closeQuickSwitcher() {
+  const palette = quickSwitcher();
+  if (!palette || palette.hidden) {
+    return;
+  }
+  palette.hidden = true;
+}
+
+function quickSwitcherOpen(): boolean {
+  const palette = quickSwitcher();
+  return Boolean(palette && !palette.hidden);
+}
+
 applyTheme(savedTheme());
 
 document.addEventListener("click", (event) => {
@@ -344,6 +523,20 @@ document.addEventListener("click", (event) => {
 document.addEventListener("click", (event) => {
   const target = eventElement(event);
   if (!target) {
+    return;
+  }
+  if (target.closest("[data-quick-open]")) {
+    openQuickSwitcher();
+    return;
+  }
+  if (target.closest("[data-quick-close]")) {
+    closeQuickSwitcher();
+    return;
+  }
+  const quickResult = target.closest<HTMLElement>("[data-quick-result]");
+  if (quickResult) {
+    syncUrlState(quickResultUrlPatch(quickResult), { mode: "push" });
+    closeQuickSwitcher();
     return;
   }
   const actionButton = target.closest<HTMLElement>("[data-action-context]");
@@ -467,6 +660,46 @@ document.addEventListener("click", (event) => {
 
 document.addEventListener("keydown", (event) => {
   const target = eventElement(event);
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+    event.preventDefault();
+    openQuickSwitcher();
+    return;
+  }
+  if (quickSwitcherOpen()) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeQuickSwitcher();
+      return;
+    }
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setQuickSelected(quickActiveIndex + 1);
+      return;
+    }
+    if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setQuickSelected(quickActiveIndex - 1);
+      return;
+    }
+    if (event.key === "Home") {
+      event.preventDefault();
+      setQuickSelected(0);
+      return;
+    }
+    if (event.key === "End") {
+      event.preventDefault();
+      setQuickSelected(visibleQuickResults().length - 1);
+      return;
+    }
+    if (event.key === "Enter") {
+      const result = visibleQuickResults()[quickActiveIndex];
+      if (result) {
+        event.preventDefault();
+        result.click();
+      }
+      return;
+    }
+  }
   if (event.key === "/" && !event.altKey && !event.ctrlKey && !event.metaKey && !isEditableShortcutTarget(target)) {
     const query = document.querySelector<HTMLInputElement>("#query");
     if (query) {
@@ -530,6 +763,10 @@ document.addEventListener("change", (event) => {
 
 document.addEventListener("input", (event) => {
   const target = event.target;
+  if (target instanceof HTMLInputElement && target.matches("[data-quick-input]")) {
+    updateQuickResults();
+    return;
+  }
   if (!(target instanceof HTMLInputElement) || !target.matches("#query")) {
     return;
   }
@@ -556,6 +793,7 @@ window.addEventListener("popstate", () => {
 
 document.addEventListener("DOMContentLoaded", () => {
   applyTheme(savedTheme());
+  updateQuickResults();
   syncUrlState();
 
   const app = document.querySelector(".app");
@@ -568,4 +806,5 @@ document.addEventListener("DOMContentLoaded", () => {
       attributeFilter: ["aria-pressed", "aria-selected", "aria-sort", "data-map-selected", "data-selected", "disabled"],
     });
   }
+
 });

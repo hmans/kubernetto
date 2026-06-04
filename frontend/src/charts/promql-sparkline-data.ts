@@ -1,7 +1,6 @@
 const sparklineCacheTTL = 60 * 1000;
 const sparklineMaxConcurrentBatches = 2;
 const sparklineMaxPodBatchItems = 8;
-const sparklineMaxQueryBatchItems = 3;
 let sparklineActiveBatches = 0;
 let sparklineBatchTimer = 0;
 
@@ -30,8 +29,6 @@ export type SparklineRequest = {
   context: string;
   namespace: string;
   pod: string;
-  cpuQuery: string;
-  memoryQuery: string;
   windowSeconds: number;
   stepSeconds: number;
 };
@@ -132,17 +129,13 @@ async function runSparklineBatch(batch: SparklineBatchItem[]) {
   if (!batch.length) {
     return;
   }
-  if (batch.every((item) => canUsePodBatch(item.request))) {
-    await runPodSparklineBatch(batch);
-    return;
-  }
-  await runQuerySparklineBatch(batch);
+  await runPodSparklineBatch(batch);
 }
 
 async function runPodSparklineBatch(batch: SparklineBatchItem[]) {
   try {
     const first = batch[0].request;
-    const response = await fetch("/ui/prometheus/query-range", {
+    const response = await fetch("/api/prometheus/pod-usage-range", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -151,10 +144,10 @@ async function runPodSparklineBatch(batch: SparklineBatchItem[]) {
         context: first.context,
         windowSeconds: first.windowSeconds,
         stepSeconds: first.stepSeconds,
-        queries: [
-          { name: "cpu", query: podBatchCPUQuery(batch.map((item) => item.request)) },
-          { name: "memory", query: podBatchMemoryQuery(batch.map((item) => item.request)) },
-        ],
+        pods: batch.map((item) => ({
+          namespace: item.request.namespace,
+          pod: item.request.pod,
+        })),
       }),
     });
     const data = await response.json() as PrometheusRangeData;
@@ -178,103 +171,24 @@ async function runPodSparklineBatch(batch: SparklineBatchItem[]) {
   }
 }
 
-async function runQuerySparklineBatch(batch: SparklineBatchItem[]) {
-  try {
-    const first = batch[0].request;
-    const response = await fetch("/ui/prometheus/query-range", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        context: first.context,
-        windowSeconds: first.windowSeconds,
-        stepSeconds: first.stepSeconds,
-        queries: batch.flatMap((item, index) => [
-          { name: `${index}:cpu`, query: item.request.cpuQuery },
-          { name: `${index}:memory`, query: item.request.memoryQuery },
-        ]),
-      }),
-    });
-    const data = await response.json() as PrometheusRangeData;
-    if (!response.ok || !data.available) {
-      throw new Error(data.message || data.error || "Prometheus data unavailable");
-    }
-
-    for (const [index, item] of batch.entries()) {
-      const prefix = `${index}:`;
-      const itemData = {
-        ...data,
-        series: (data.series || [])
-          .filter((series) => series.name.startsWith(prefix))
-          .map((series) => ({ ...series, name: series.name.slice(prefix.length) })),
-      };
-      sparklineCache.set(item.key, { data: itemData, updatedAt: Date.now() });
-      item.resolve(itemData);
-    }
-  } catch (error) {
-    for (const item of batch) {
-      item.reject(error);
-    }
-  }
-}
-
 function sparklineBatchCompatible(a: SparklineRequest, b: SparklineRequest): boolean {
   return a.context === b.context &&
     a.windowSeconds === b.windowSeconds &&
-    a.stepSeconds === b.stepSeconds &&
-    canUsePodBatch(a) === canUsePodBatch(b);
+    a.stepSeconds === b.stepSeconds;
 }
 
-function sparklineBatchLimit(request: SparklineRequest): number {
-  return canUsePodBatch(request) ? sparklineMaxPodBatchItems : sparklineMaxQueryBatchItems;
+function sparklineBatchLimit(_request: SparklineRequest): number {
+  return sparklineMaxPodBatchItems;
 }
 
 function sparklineCacheKey(request: SparklineRequest): string {
-  if (canUsePodBatch(request)) {
-    return JSON.stringify({
-      context: request.context,
-      namespace: request.namespace,
-      pod: request.pod,
-      windowSeconds: request.windowSeconds,
-      stepSeconds: request.stepSeconds,
-    });
-  }
-  return JSON.stringify(request);
-}
-
-function canUsePodBatch(request: SparklineRequest): boolean {
-  return Boolean(request.namespace && request.pod);
-}
-
-function podBatchCPUQuery(requests: SparklineRequest[]): string {
-  return `sum by (namespace, pod) (${podBatchSelectors(requests, "container_cpu_usage_seconds_total")
-    .map((selector) => `rate(${selector}[5m])`)
-    .join(" or ")})`;
-}
-
-function podBatchMemoryQuery(requests: SparklineRequest[]): string {
-  return `sum by (namespace, pod) (${podBatchSelectors(requests, "container_memory_working_set_bytes").join(" or ")})`;
-}
-
-function podBatchSelectors(requests: SparklineRequest[], metric: string): string[] {
-  return [...podBatchPodsByNamespace(requests).entries()]
-    .map(([namespace, pods]) => `${metric}{namespace="${escapePrometheusLabelValue(namespace)}",pod=~"${podBatchPodRegex(pods)}",container!="",image!=""}`);
-}
-
-function podBatchPodsByNamespace(requests: SparklineRequest[]): Map<string, string[]> {
-  const podsByNamespace = new Map<string, Set<string>>();
-  for (const request of requests) {
-    if (!podsByNamespace.has(request.namespace)) {
-      podsByNamespace.set(request.namespace, new Set());
-    }
-    podsByNamespace.get(request.namespace)?.add(request.pod);
-  }
-  return new Map([...podsByNamespace.entries()].map(([namespace, pods]) => [namespace, [...pods].sort()]));
-}
-
-function podBatchPodRegex(pods: string[]): string {
-  return escapePrometheusLabelValue(pods.map(escapeRegexLiteral).join("|"));
+  return JSON.stringify({
+    context: request.context,
+    namespace: request.namespace,
+    pod: request.pod,
+    windowSeconds: request.windowSeconds,
+    stepSeconds: request.stepSeconds,
+  });
 }
 
 function podBatchSeriesByPod(series: PrometheusRangeSeries[]): Map<string, PrometheusRangeSeries[]> {
@@ -291,17 +205,6 @@ function podBatchSeriesByPod(series: PrometheusRangeSeries[]): Map<string, Prome
 
 function podBatchKey(namespace: string, pod: string): string {
   return `${namespace}\u0000${pod}`;
-}
-
-function escapeRegexLiteral(value: string): string {
-  return String(value).replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
-}
-
-function escapePrometheusLabelValue(value: string): string {
-  return String(value)
-    .replaceAll("\\", "\\\\")
-    .replaceAll("\n", "\\n")
-    .replaceAll('"', '\\"');
 }
 
 function withAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {

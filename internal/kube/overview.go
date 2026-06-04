@@ -165,10 +165,10 @@ func usageMetrics(usage, allocatable corev1.ResourceList) []OverviewMetric {
 
 // PodUsageOverviewChart loads chart data on demand. Page overview rendering
 // deliberately does not call this so chart range queries stay lazy.
-func (s *ResourceStore) PodUsageOverviewChart(cpuQuery, memoryQuery string, limit int) PodUsageOverviewChart {
+func (s *ResourceStore) PodUsageOverviewChart(limit int) PodUsageOverviewChart {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	if timelines, target, err := s.loadPrometheusTimelines(ctx, cpuQuery, memoryQuery); err == nil {
+	if timelines, target, err := s.loadPrometheusTimelines(ctx); err == nil {
 		metrics := MetricsState{
 			Available: true,
 			Message:   "Prometheus is reporting pod usage.",
