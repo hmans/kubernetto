@@ -1213,12 +1213,8 @@ class ClusterMapController {
       const materials = Array.isArray(material) ? material : material ? [material] : [];
       for (const item of materials) {
         const warningShader = item.userData.warningShader as { uniforms?: { warningTime?: { value: number } } } | undefined;
-        const spotlightShader = item.userData.spotlightShader as { uniforms?: { spotlightTime?: { value: number } } } | undefined;
         if (warningShader?.uniforms?.warningTime) {
           warningShader.uniforms.warningTime.value = elapsed;
-        }
-        if (spotlightShader?.uniforms?.spotlightTime) {
-          spotlightShader.uniforms.spotlightTime.value = elapsed;
         }
       }
     });
@@ -2477,7 +2473,6 @@ function createDustGeometry() {
 function selectionEffectFor(item: MapLayoutItem) {
   const color = colorFor(item.statusKey, item.type);
   const group = new THREE.Group();
-  group.add(...selectionSpotlightFor(item));
   if (item.type === "warning") {
     const scale = instancedBaseScaleFor(item);
     const glow = new THREE.Mesh(instancedGeometryFor("warning"), warningSelectionMaterial(item, color, false));
@@ -2520,55 +2515,6 @@ function selectionEffectFor(item: MapLayoutItem) {
   group.add(outline);
   group.userData.selectionEffect = true;
   return group;
-}
-
-function selectionSpotlightFor(item: MapLayoutItem) {
-  const broad = item.type === "namespace" || item.type === "category";
-  const haloRadius = broad ? item.size * 1.18 : THREE.MathUtils.clamp(item.size * 1.65, 1.8, 6.2);
-  const effects: THREE.Object3D[] = [];
-  const haloGeometry = new THREE.CircleGeometry(haloRadius, 64);
-  const halo = new THREE.Mesh(haloGeometry, spotlightHaloMaterial());
-  halo.rotation.x = -Math.PI / 2;
-  halo.position.y = 0.035;
-  halo.renderOrder = 96;
-  halo.userData.excludeFromBokehDepth = true;
-  effects.push(halo);
-  return effects;
-}
-
-function spotlightHaloMaterial() {
-  const material = new THREE.ShaderMaterial({
-    uniforms: {
-      spotlightTime: { value: 0 },
-    },
-    vertexShader: `
-      varying vec2 vSpotUv;
-      void main() {
-        vSpotUv = uv;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-    `,
-    fragmentShader: `
-      uniform float spotlightTime;
-      varying vec2 vSpotUv;
-      void main() {
-        vec2 point = vSpotUv - vec2(0.5);
-        float radial = length(point) * 2.0;
-        float core = 1.0 - smoothstep(0.0, 0.46, radial);
-        float ring = 1.0 - smoothstep(0.68, 1.0, radial);
-        float pulse = sin(spotlightTime * 1.8) * 0.018;
-        float alpha = (core * 0.13 + ring * 0.07 + pulse) * (1.0 - smoothstep(0.92, 1.0, radial));
-        gl_FragColor = vec4(0.72, 1.0, 0.9, max(alpha, 0.0));
-      }
-    `,
-    transparent: true,
-    depthTest: false,
-    depthWrite: false,
-    side: THREE.DoubleSide,
-    blending: THREE.AdditiveBlending,
-  });
-  material.userData.spotlightShader = material;
-  return material;
 }
 
 function warningSelectionMaterial(item: MapLayoutItem, color: number, wireframe: boolean) {
