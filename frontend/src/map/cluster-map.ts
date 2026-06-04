@@ -292,6 +292,10 @@ class ClusterMapController {
   private labelLayer = document.createElement("div");
   private raycaster = new THREE.Raycaster();
   private pointer = new THREE.Vector2();
+  private focusPointer = new THREE.Vector2();
+  private focusPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  private focusPoint = new THREE.Vector3();
+  private hasPointerFocus = false;
   private pointerDown: { x: number; y: number } | null = null;
   private pointerMovedSinceDown = false;
   private frame = 0;
@@ -442,6 +446,7 @@ class ClusterMapController {
   }
 
   debugStats() {
+    const bokehUniforms = this.bokehPass.uniforms as { focus?: { value: number }; aperture?: { value: number }; maxblur?: { value: number } };
     return {
       render: { ...this.lastRenderInfo },
       controls: {
@@ -450,6 +455,15 @@ class ClusterMapController {
         paused: this.paused,
         camera: this.camera.position.toArray().map((value) => Number(value.toFixed(3))),
         target: this.controls.target.toArray().map((value) => Number(value.toFixed(3))),
+      },
+      focus: {
+        value: Number((bokehUniforms.focus?.value || 0).toFixed(3)),
+        target: Number(this.currentFocusDistance().toFixed(3)),
+        mouse: this.hasPointerFocus,
+        hovered: this.hoveredItemId,
+        selected: this.selectedItemId,
+        aperture: Number((bokehUniforms.aperture?.value || 0).toFixed(6)),
+        maxblur: Number((bokehUniforms.maxblur?.value || 0).toFixed(3)),
       },
       sceneDrawables: sceneDrawableStats(this.scene),
       connectorBatches: this.connectors.length,
@@ -1154,9 +1168,9 @@ class ClusterMapController {
       this.updateDust(elapsed);
     }
     this.updateFocusTween();
-    this.updatePostprocessingFocus();
     this.controls.autoRotate = this.autorotate && !this.paused && !this.focusTween && !reducedMotion?.matches;
     this.controls.update();
+    this.updatePostprocessingFocus();
     this.updateLabels();
     this.renderer.info.reset();
     this.composer.render();
@@ -1195,7 +1209,7 @@ class ClusterMapController {
 
   private updatePostprocessingFocus() {
     const uniforms = this.bokehPass.uniforms as { focus?: { value: number }; aperture?: { value: number }; maxblur?: { value: number } };
-    const targetDistance = this.camera.position.distanceTo(this.controls.target);
+    const targetDistance = this.currentFocusDistance();
     if (uniforms.focus) {
       uniforms.focus.value = THREE.MathUtils.lerp(uniforms.focus.value, targetDistance, 0.22);
     }
@@ -1205,6 +1219,32 @@ class ClusterMapController {
     if (uniforms.maxblur) {
       uniforms.maxblur.value = this.selectedItemId ? 0.065 : 0.028;
     }
+  }
+
+  private currentFocusDistance() {
+    const hoveredPoint = this.hovered ? this.worldFocusPointFor(this.hovered, this.focusPoint) : null;
+    if (hoveredPoint) {
+      return this.camera.position.distanceTo(hoveredPoint);
+    }
+    if (this.hasPointerFocus) {
+      this.raycaster.setFromCamera(this.focusPointer, this.camera);
+      const groundPoint = this.raycaster.ray.intersectPlane(this.focusPlane, this.focusPoint);
+      if (groundPoint) {
+        return this.camera.position.distanceTo(groundPoint);
+      }
+    }
+    const selectedObject = this.selectedItemId ? this.objectsById.get(this.selectedItemId) : null;
+    const selectedPoint = selectedObject ? this.worldFocusPointFor(selectedObject, this.focusPoint) : null;
+    return this.camera.position.distanceTo(selectedPoint || this.controls.target);
+  }
+
+  private worldFocusPointFor(object: THREE.Object3D, target: THREE.Vector3) {
+    object.getWorldPosition(target);
+    const item = object.userData.item as MapLayoutItem | undefined;
+    if (item) {
+      target.y += Math.max(0.35, item.size * 0.36);
+    }
+    return target;
   }
 
   private onPointerDown = (event: PointerEvent) => {
@@ -1227,8 +1267,16 @@ class ClusterMapController {
     }
     const rect = this.renderer.domElement.getBoundingClientRect();
     const object = this.pickObjectAt(event.clientX, event.clientY);
+    this.updatePointerFocus(event.clientX, event.clientY);
     this.setHovered(object, event.clientX - rect.left, event.clientY - rect.top);
   };
+
+  private updatePointerFocus(clientX: number, clientY: number) {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    this.focusPointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    this.focusPointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+    this.hasPointerFocus = true;
+  }
 
   private pickObjectAt(clientX: number, clientY: number) {
     const rect = this.renderer.domElement.getBoundingClientRect();
@@ -1252,6 +1300,7 @@ class ClusterMapController {
     if (this.pointerDown) {
       this.pointerMovedSinceDown = true;
     }
+    this.hasPointerFocus = false;
     this.setHovered(null, 0, 0);
   };
 
