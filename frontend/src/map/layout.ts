@@ -2,16 +2,12 @@ import type { ClusterMapData, MapClusterResource, MapLayoutItem, MapNamespace, M
 
 const islandGapX = 21;
 const islandGapZ = 16;
-const namespaceOrbit = 5.2;
 const categoryOrbit = 4.6;
-const podBranch = 2.35;
-const serviceOrbit = 8.4;
-const warningOrbit = 9.8;
 const itemGap = 1.45;
 
 export function buildMapLayout(data: ClusterMapData): MapLayoutItem[] {
   const items: MapLayoutItem[] = [];
-  const namespacePositions = new Map<string, { x: number; z: number; height: number }>();
+  const namespacePositions = new Map<string, NamespaceFootprint>();
   const podPositions = new Map<string, { x: number; z: number }>();
   const workloadPositions = new Map<string, { x: number; z: number }>();
   const namespaceOwnedIds = new Map<string, Set<string>>();
@@ -27,9 +23,9 @@ export function buildMapLayout(data: ClusterMapData): MapLayoutItem[] {
 
   namespaces.forEach((namespace) => {
     const center = islandCenter(topLevelIndex, topLevelCount);
-    const radius = namespaceRadius(namespace.name, workloadGroups, podGroups, serviceGroups, warningGroups);
+    const footprint = namespaceFootprint(namespace.name, workloadGroups, podGroups, serviceGroups, warningGroups);
     topLevelIndex += 1;
-    namespacePositions.set(namespace.name, { x: center.x, z: center.z, height: radius * 2 });
+    namespacePositions.set(namespace.name, { ...footprint, x: center.x, z: center.z });
     items.push({
       id: namespace.id,
       type: "namespace",
@@ -39,7 +35,7 @@ export function buildMapLayout(data: ClusterMapData): MapLayoutItem[] {
       x: center.x,
       y: 0,
       z: center.z,
-      size: radius,
+      size: footprint.radius,
       href: resourceHref("namespaces", "", namespace.name),
       targetIds: [],
       trafficTargetIds: [],
@@ -99,7 +95,7 @@ export function buildMapLayout(data: ClusterMapData): MapLayoutItem[] {
   for (const [namespace, workloads] of workloadGroups) {
     const origin = namespacePositions.get(namespace) || fallbackNamespacePosition(namespacePositions);
     workloads.forEach((workload, index) => {
-      const point = resourceOrbitPoint(origin, index, workloads.length, namespaceOrbit, namespaceAngleSeed(namespace));
+      const point = resourceOrbitPoint(origin, index, workloads.length, origin.workloadOrbit, namespaceAngleSeed(namespace));
       workloadPositions.set(workload.id, point);
       addOwned(namespaceOwnedIds, namespace, workload.id);
       items.push(workloadItem(workload, point.x, point.z));
@@ -116,8 +112,8 @@ export function buildMapLayout(data: ClusterMapData): MapLayoutItem[] {
       const ownerIndex = usedSlots.get(pod.ownerId || "") || 0;
       usedSlots.set(pod.ownerId || "", ownerIndex + 1);
       const point = ownerPoint
-        ? branchPoint(origin, ownerPoint, ownerIndex, ownerPods.length, podBranch)
-        : resourceOrbitPoint(origin, index, pods.length, namespaceOrbit + podBranch, namespaceAngleSeed(namespace) + 0.42);
+        ? branchPoint(origin, ownerPoint, ownerIndex, ownerPods.length, origin.podBranch)
+        : resourceOrbitPoint(origin, index, pods.length, origin.podOrbit, namespaceAngleSeed(namespace) + 0.42);
       podPositions.set(pod.id, point);
       addOwned(namespaceOwnedIds, namespace, pod.id);
       if (pod.node) {
@@ -132,8 +128,8 @@ export function buildMapLayout(data: ClusterMapData): MapLayoutItem[] {
     services.forEach((service, index) => {
       const targetPoint = averageTargetPoint(service.targetPodIds || [], podPositions);
       const point = targetPoint
-        ? outerPoint(origin, targetPoint, index, services.length, serviceOrbit)
-        : resourceOrbitPoint(origin, index, services.length, serviceOrbit, namespaceAngleSeed(namespace) + 0.9);
+        ? outerPoint(origin, targetPoint, index, services.length, origin.serviceOrbit)
+        : resourceOrbitPoint(origin, index, services.length, origin.serviceOrbit, namespaceAngleSeed(namespace) + 0.9);
       addOwned(namespaceOwnedIds, namespace, service.id);
       items.push(serviceItem(service, point.x, point.z));
     });
@@ -143,8 +139,8 @@ export function buildMapLayout(data: ClusterMapData): MapLayoutItem[] {
     const target = items.find((item) => item.id === warning.targetId);
     const namespaceOrigin = namespacePositions.get(warning.namespace) || fallbackNamespacePosition(namespacePositions);
     const point = target
-      ? outerPoint(namespaceOrigin, target, index, data.warnings.length, warningOrbit)
-      : resourceOrbitPoint(namespaceOrigin, index, data.warnings.length, warningOrbit, namespaceAngleSeed(warning.namespace) + 1.3);
+      ? outerPoint(namespaceOrigin, target, index, data.warnings.length, namespaceOrigin.warningOrbit)
+      : resourceOrbitPoint(namespaceOrigin, index, data.warnings.length, namespaceOrigin.warningOrbit, namespaceAngleSeed(warning.namespace) + 1.3);
     items.push(warningItem(warning, point.x, point.z, index));
   });
 
@@ -166,6 +162,17 @@ type ClusterCategory = {
   name: string;
   href: string;
   children: MapClusterResource[];
+};
+
+type NamespaceFootprint = {
+  x: number;
+  z: number;
+  radius: number;
+  workloadOrbit: number;
+  podOrbit: number;
+  podBranch: number;
+  serviceOrbit: number;
+  warningOrbit: number;
 };
 
 function workloadItem(workload: MapWorkload, x: number, z: number): MapLayoutItem {
@@ -331,21 +338,33 @@ function categoryRank(name: string) {
     : ["Nodes", "Storage", "RBAC", "Scheduling", "Webhooks"].indexOf(name);
 }
 
-function namespaceRadius(
+function namespaceFootprint(
   namespace: string,
   workloadGroups: Map<string, MapWorkload[]>,
   podGroups: Map<string, MapPod[]>,
   serviceGroups: Map<string, MapService[]>,
   warningGroups: Map<string, MapWarning[]>,
 ) {
-  const visible = Math.max(
-    workloadGroups.get(namespace)?.length || 0,
-    podGroups.get(namespace)?.length || 0,
-    serviceGroups.get(namespace)?.length || 0,
-    warningGroups.get(namespace)?.length || 0,
-    1,
-  );
-  return Math.max(5.8, Math.min(10.2, 4.2 + Math.sqrt(visible) * 1.15));
+  const workloads = workloadGroups.get(namespace)?.length || 0;
+  const pods = podGroups.get(namespace)?.length || 0;
+  const services = serviceGroups.get(namespace)?.length || 0;
+  const warnings = warningGroups.get(namespace)?.length || 0;
+  const visible = workloads + pods + services + warnings;
+  const weight = Math.max(1, workloads * 1.45 + pods * 0.42 + services * 1.05 + warnings * 1.35);
+  const radius = clamp(4.9 + Math.sqrt(weight) * 1.26, 5.25, 13.6);
+  const compactness = visible <= 2 ? 0.22 : visible <= 5 ? 0.32 : visible <= 12 ? 0.43 : 0.52;
+  const workloadOrbit = Math.max(0, radius * compactness);
+  const podBranch = clamp(radius * 0.2, 1.25, 2.5);
+  return {
+    x: 0,
+    z: 0,
+    radius,
+    workloadOrbit,
+    podOrbit: Math.min(radius * 0.72, workloadOrbit + podBranch),
+    podBranch,
+    serviceOrbit: radius * (visible <= 4 ? 0.58 : 0.72),
+    warningOrbit: radius * 0.84,
+  };
 }
 
 function fitNamespaceRadii(items: MapLayoutItem[], warningGroups: Map<string, MapWarning[]>) {
@@ -414,8 +433,8 @@ function islandCenter(index: number, total: number) {
 function resourceOrbitPoint(center: { x: number; z: number }, index: number, total: number, radius: number, seed = -Math.PI / 2) {
   if (total <= 1) {
     return {
-      x: center.x + Math.cos(seed) * radius,
-      z: center.z + Math.sin(seed) * radius,
+      x: center.x,
+      z: center.z,
     };
   }
   const turns = total > 18 ? 1.55 : 1;
@@ -436,7 +455,15 @@ function branchPoint(
 ) {
   const directionX = anchor.x - center.x;
   const directionZ = anchor.z - center.z;
-  const length = Math.hypot(directionX, directionZ) || 1;
+  const length = Math.hypot(directionX, directionZ);
+  if (length < 0.001) {
+    const angle = -Math.PI / 2 + (index / Math.max(1, total)) * Math.PI * 2;
+    const ring = total <= 1 ? distance * 0.62 : distance;
+    return {
+      x: anchor.x + Math.cos(angle) * ring,
+      z: anchor.z + Math.sin(angle) * ring,
+    };
+  }
   const normalX = directionX / length;
   const normalZ = directionZ / length;
   const tangentX = -normalZ;
@@ -467,8 +494,17 @@ function siblingOffset(index: number, total: number, gap: number) {
   return (index - Math.max(0, total - 1) / 2) * gap;
 }
 
-function fallbackNamespacePosition(positions: Map<string, { x: number; z: number; height: number }>) {
-  return positions.values().next().value || { x: 0, z: 0, height: 8 };
+function fallbackNamespacePosition(positions: Map<string, NamespaceFootprint>): NamespaceFootprint {
+  return positions.values().next().value || {
+    x: 0,
+    z: 0,
+    radius: 6,
+    workloadOrbit: 2,
+    podOrbit: 3.4,
+    podBranch: 1.4,
+    serviceOrbit: 4.1,
+    warningOrbit: 5,
+  };
 }
 
 function averageTargetPoint(targetIds: string[], positions: Map<string, { x: number; z: number }>) {
@@ -496,6 +532,10 @@ function namespaceAngleSeed(namespace: string) {
     hash = (hash * 31 + namespace.charCodeAt(index)) >>> 0;
   }
   return -Math.PI / 2 + ((hash % 360) / 360) * Math.PI * 0.36;
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value));
 }
 
 function resourceHref(resource: string, namespace: string, name: string): string {

@@ -84,4 +84,85 @@ describe("cluster map layout", () => {
       );
     }
   });
+
+  it("scales namespace territory by contents and keeps sparse resources near the center", () => {
+    const data: ClusterMapData = {
+      context: "prod",
+      cluster: "prod",
+      updatedAt: new Date().toISOString(),
+      truncated: false,
+      counts: { nodes: 0, namespaces: 2, workloads: 7, pods: 18, services: 4, warnings: 0 },
+      nodes: [],
+      namespaces: [
+        { id: "namespace:sparse", name: "sparse", podCount: 1, workloadCount: 1, serviceCount: 0, warningCount: 0 },
+        { id: "namespace:dense", name: "dense", podCount: 17, workloadCount: 6, serviceCount: 4, warningCount: 0 },
+      ],
+      workloads: [
+        workload("sparse", "one", 1),
+        ...Array.from({ length: 6 }, (_, index) => workload("dense", `app-${index}`, 3)),
+      ],
+      pods: [
+        pod("sparse", "one-0", "workload:Deployment:sparse:one"),
+        ...Array.from({ length: 18 }, (_, index) => pod("dense", `app-${index}`, `workload:Deployment:dense:app-${index % 6}`)),
+      ],
+      services: Array.from({ length: 4 }, (_, index) => ({
+        id: `service:dense:svc-${index}`,
+        namespace: "dense",
+        name: `svc-${index}`,
+        type: "ClusterIP",
+        selector: `app=${index}`,
+        targetPodIds: [`pod:dense:app-${index}`],
+        targetPodCount: 1,
+        targetNamespace: "dense",
+      })),
+      warnings: [],
+    };
+
+    const layout = buildMapLayout(data);
+    const sparse = layout.find((item) => item.id === "namespace:sparse");
+    const dense = layout.find((item) => item.id === "namespace:dense");
+    const sparseWorkload = layout.find((item) => item.id === "workload:Deployment:sparse:one");
+    const sparsePod = layout.find((item) => item.id === "pod:sparse:one-0");
+
+    expect(sparse).toBeTruthy();
+    expect(dense).toBeTruthy();
+    expect((dense?.size || 0) - (sparse?.size || 0)).toBeGreaterThan(2);
+    expect(distance(sparse, sparseWorkload)).toBeLessThan((sparse?.size || 0) * 0.18);
+    expect(distance(sparse, sparsePod)).toBeLessThan((sparse?.size || 0) * 0.55);
+  });
 });
+
+function workload(namespace: string, name: string, desired: number) {
+  return {
+    id: `workload:Deployment:${namespace}:${name}`,
+    kind: "deployments",
+    namespace,
+    name,
+    ready: desired,
+    desired,
+    statusKey: "good",
+    podIds: Array.from({ length: desired }, (_, index) => `pod:${namespace}:${name}-${index}`),
+  };
+}
+
+function pod(namespace: string, name: string, ownerId: string) {
+  return {
+    id: `pod:${namespace}:${name}`,
+    namespace,
+    name,
+    node: "",
+    phase: "Running",
+    ready: true,
+    statusKey: "good",
+    ownerKind: "Deployment",
+    ownerName: ownerId.split(":").pop() || "",
+    ownerId,
+  };
+}
+
+function distance(left?: { x: number; z: number }, right?: { x: number; z: number }) {
+  if (!left || !right) {
+    return Number.POSITIVE_INFINITY;
+  }
+  return Math.hypot(left.x - right.x, left.z - right.z);
+}
