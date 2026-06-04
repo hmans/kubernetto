@@ -82,6 +82,8 @@ templ ContentView(state PageState) {
 		</div>
 		if isOverview(state) {
 			@OverviewView(state)
+		} else if isMap(state) {
+			@MapView(state)
 		} else if isActionItems(state) {
 			@ActionItemsView(state)
 		} else {

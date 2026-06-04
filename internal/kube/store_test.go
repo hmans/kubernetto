@@ -3,6 +3,7 @@ package kube
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"testing"
@@ -229,6 +230,194 @@ func TestResourceStoreReadsFromInformerCache(t *testing.T) {
 	}
 	if got, want := deployments.Rows[0].Cells[8].Value, "256Mi"; got != want {
 		t.Fatalf("deployment mem limit = %q, want %q", got, want)
+	}
+}
+
+func TestResourceStoreClusterMapBuildsTopology(t *testing.T) {
+	controller := true
+	clientset := fake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "default"}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "prod"}},
+		&corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: "node-1"},
+			Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{
+				{Type: corev1.NodeReady, Status: corev1.ConditionTrue},
+			}},
+		},
+		&appsv1.Deployment{
+			ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "prod"},
+			Spec: appsv1.DeploymentSpec{
+				Replicas: ptr(int32(1)),
+				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}},
+			},
+			Status: appsv1.DeploymentStatus{ReadyReplicas: 1, UpdatedReplicas: 1},
+		},
+		&appsv1.ReplicaSet{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "api-7f68",
+				Namespace: "prod",
+				OwnerReferences: []metav1.OwnerReference{
+					{Kind: "Deployment", Name: "api", Controller: &controller},
+				},
+			},
+		},
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "api-7f68-abcde",
+				Namespace: "prod",
+				Labels:    map[string]string{"app": "api"},
+				OwnerReferences: []metav1.OwnerReference{
+					{Kind: "ReplicaSet", Name: "api-7f68", Controller: &controller},
+				},
+			},
+			Spec: corev1.PodSpec{
+				NodeName:   "node-1",
+				Containers: []corev1.Container{{Name: "api"}},
+			},
+			Status: corev1.PodStatus{
+				Phase: corev1.PodRunning,
+				ContainerStatuses: []corev1.ContainerStatus{
+					{Name: "api", Ready: true},
+				},
+			},
+		},
+		&corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "prod"},
+			Spec: corev1.ServiceSpec{
+				Type:     corev1.ServiceTypeClusterIP,
+				Selector: map[string]string{"app": "api"},
+			},
+		},
+		&corev1.PersistentVolume{
+			ObjectMeta: metav1.ObjectMeta{Name: "api-pv"},
+			Status:     corev1.PersistentVolumeStatus{Phase: corev1.VolumeBound},
+		},
+		&storagev1.StorageClass{ObjectMeta: metav1.ObjectMeta{Name: "fast"}, Provisioner: "kubernetes.io/no-provisioner"},
+		&rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: "reader"}, Rules: []rbacv1.PolicyRule{{Verbs: []string{"get"}, Resources: []string{"pods"}}}},
+		&schedulingv1.PriorityClass{ObjectMeta: metav1.ObjectMeta{Name: "high"}, Value: 1000},
+		&nodev1.RuntimeClass{ObjectMeta: metav1.ObjectMeta{Name: "runc"}, Handler: "runc"},
+		&admissionv1.MutatingWebhookConfiguration{ObjectMeta: metav1.ObjectMeta{Name: "mutating"}, Webhooks: []admissionv1.MutatingWebhook{{Name: "mutate.example.com"}}},
+		&corev1.Event{
+			ObjectMeta: metav1.ObjectMeta{Name: "api-warning", Namespace: "prod"},
+			Type:       corev1.EventTypeWarning,
+			Reason:     "BackOff",
+			Message:    "retrying",
+			InvolvedObject: corev1.ObjectReference{
+				Kind:      "Pod",
+				Name:      "api-7f68-abcde",
+				Namespace: "prod",
+			},
+			Count:          3,
+			LastTimestamp:  metav1.Now(),
+			EventTime:      metav1.MicroTime{Time: time.Now()},
+			FirstTimestamp: metav1.Now(),
+		},
+	)
+	store := syncedTestStore(t, clientset)
+
+	clusterMap, err := store.ClusterMap()
+	if err != nil {
+		t.Fatalf("ClusterMap: %v", err)
+	}
+
+	if clusterMap.Context != "test" || clusterMap.Counts.Nodes != 1 || clusterMap.Counts.Pods != 1 || clusterMap.Counts.Services != 1 {
+		t.Fatalf("unexpected map counts: %#v", clusterMap)
+	}
+	if len(clusterMap.Nodes) != 1 || !clusterMap.Nodes[0].Ready || clusterMap.Nodes[0].PodCount != 1 {
+		t.Fatalf("nodes = %#v, want ready node with one pod", clusterMap.Nodes)
+	}
+	if len(clusterMap.Workloads) != 1 || clusterMap.Workloads[0].ID != "workload:Deployment:prod:api" {
+		t.Fatalf("workloads = %#v, want deployment workload", clusterMap.Workloads)
+	}
+	if got := clusterMap.Workloads[0].PodIDs; len(got) != 1 || got[0] != "pod:prod:api-7f68-abcde" {
+		t.Fatalf("workload pod IDs = %#v", got)
+	}
+	if len(clusterMap.Pods) != 1 || clusterMap.Pods[0].OwnerKind != "Deployment" || clusterMap.Pods[0].OwnerName != "api" || clusterMap.Pods[0].OwnerID != "workload:Deployment:prod:api" {
+		t.Fatalf("pod owner = %#v, want resolved deployment owner", clusterMap.Pods)
+	}
+	if got := clusterMap.Services[0].TargetPodIDs; len(got) != 1 || got[0] != "pod:prod:api-7f68-abcde" {
+		t.Fatalf("service targets = %#v", got)
+	}
+	if len(clusterMap.Warnings) != 1 || clusterMap.Warnings[0].TargetID != "pod:prod:api-7f68-abcde" {
+		t.Fatalf("warnings = %#v, want pod target", clusterMap.Warnings)
+	}
+	categories := map[string]bool{}
+	for _, resource := range clusterMap.ClusterResources {
+		categories[resource.Category] = true
+	}
+	for _, category := range []string{"Storage", "RBAC", "Scheduling", "Webhooks"} {
+		if !categories[category] {
+			t.Fatalf("cluster resource categories = %#v, missing %s", categories, category)
+		}
+	}
+}
+
+func TestResourceStoreClusterMapCapsVisibleObjects(t *testing.T) {
+	objects := []runtime.Object{&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "default"}}}
+	for i := 0; i < mapPodLimit+5; i++ {
+		objects = append(objects, &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("pod-%03d", i), Namespace: "default"},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "pod"}}},
+			Status: corev1.PodStatus{
+				Phase: corev1.PodRunning,
+				ContainerStatuses: []corev1.ContainerStatus{
+					{Name: "pod", Ready: true},
+				},
+			},
+		})
+	}
+	store := syncedTestStore(t, fake.NewSimpleClientset(objects...))
+
+	clusterMap, err := store.ClusterMap()
+	if err != nil {
+		t.Fatalf("ClusterMap: %v", err)
+	}
+
+	if !clusterMap.Truncated {
+		t.Fatalf("ClusterMap truncated = false, want true")
+	}
+	if len(clusterMap.Pods) != mapPodLimit {
+		t.Fatalf("visible pods = %d, want %d", len(clusterMap.Pods), mapPodLimit)
+	}
+	if clusterMap.Counts.Pods != mapPodLimit+5 {
+		t.Fatalf("pod count = %d, want full count", clusterMap.Counts.Pods)
+	}
+}
+
+func TestResourceStoreClusterMapBalancesClusterResourceCap(t *testing.T) {
+	objects := []runtime.Object{
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "default"}},
+		&storagev1.StorageClass{ObjectMeta: metav1.ObjectMeta{Name: "fast"}, Provisioner: "kubernetes.io/no-provisioner"},
+		&schedulingv1.PriorityClass{ObjectMeta: metav1.ObjectMeta{Name: "high"}, Value: 1000},
+		&admissionv1.ValidatingWebhookConfiguration{ObjectMeta: metav1.ObjectMeta{Name: "validating"}, Webhooks: []admissionv1.ValidatingWebhook{{Name: "validate.example.com"}}},
+	}
+	for i := 0; i < mapClusterResourceLimit+20; i++ {
+		objects = append(objects, &rbacv1.ClusterRole{
+			ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("role-%03d", i)},
+			Rules:      []rbacv1.PolicyRule{{Verbs: []string{"get"}, Resources: []string{"pods"}}},
+		})
+	}
+	store := syncedTestStore(t, fake.NewSimpleClientset(objects...))
+
+	clusterMap, err := store.ClusterMap()
+	if err != nil {
+		t.Fatalf("ClusterMap: %v", err)
+	}
+
+	if !clusterMap.Truncated {
+		t.Fatalf("ClusterMap truncated = false, want true")
+	}
+	if len(clusterMap.ClusterResources) != mapClusterResourceLimit {
+		t.Fatalf("cluster resources = %d, want %d", len(clusterMap.ClusterResources), mapClusterResourceLimit)
+	}
+	categories := map[string]bool{}
+	for _, resource := range clusterMap.ClusterResources {
+		categories[resource.Category] = true
+	}
+	for _, category := range []string{"Storage", "RBAC", "Scheduling", "Webhooks"} {
+		if !categories[category] {
+			t.Fatalf("cluster resource categories = %#v, missing %s", categories, category)
+		}
 	}
 }
 

@@ -1,0 +1,81 @@
+package ui
+
+import "fmt"
+
+templ MapView(state PageState) {
+	<section class="map-page" aria-label="Cluster map">
+		<div class="map-header">
+			<div class="min-w-0">
+				<h2>Cluster Map</h2>
+				if mapHasMultipleClusterSelection(state) {
+					<div class="updated">Choose one cluster for the 3D topology view</div>
+				} else if mapClusterContext(state) != "" {
+					<div class="updated">{ fmt.Sprintf("%s · %s", mapClusterName(state), mapClusterContext(state)) }</div>
+				} else {
+					<div class="updated">No cluster context is available</div>
+				}
+			</div>
+			@MapClusterPickerView(state)
+		</div>
+		if len(state.Clusters) == 0 {
+			<div class="notice danger">No Kubernetes client is configured.</div>
+		} else if mapHasMultipleClusterSelection(state) {
+			<div class="empty">Select one cluster to render its topology map.</div>
+		} else if mapClusterContext(state) == "" {
+			<div class="notice danger">No cluster context is available.</div>
+		} else {
+			<div
+				class="map-shell"
+				data-cluster-map
+				data-context={ mapClusterContext(state) }
+				data-endpoint={ mapDataEndpoint(state) }
+				aria-label={ "3D topology map for " + mapClusterContext(state) }
+			>
+				<div class="map-toolbar" aria-label="Map controls">
+					<button type="button" class="icon-button" data-map-reset title="Reset camera" aria-label="Reset camera">
+						<span class="icon-[lucide--rotate-ccw]" aria-hidden="true"></span>
+					</button>
+					<button type="button" class="icon-button" data-map-toggle title="Pause animation" aria-label="Pause animation" aria-pressed="false">
+						<span class="icon-[lucide--pause]" aria-hidden="true"></span>
+					</button>
+					<button type="button" class="icon-button" data-map-autorotate title="Start slow autorotation" aria-label="Start slow autorotation" aria-pressed="false">
+						<span class="icon-[lucide--rotate-cw]" aria-hidden="true"></span>
+					</button>
+				</div>
+				<div class="map-stage" data-map-viewport>
+					<div class="map-loading" data-map-loading>
+						<span class="icon-[lucide--loader-circle]" aria-hidden="true"></span>
+						<span>Loading map</span>
+					</div>
+					<div class="map-tooltip" data-map-tooltip hidden></div>
+				</div>
+				<aside class="map-inspector" data-map-inspector aria-live="polite">
+					<div>
+						<div class="map-inspector-label">Selected</div>
+						<strong>Cluster topology</strong>
+						<span>Click an object in the scene.</span>
+					</div>
+				</aside>
+				<div class="map-stats" aria-label="Map resource counts">
+					<div><span>Nodes</span><strong data-map-count="nodes">0</strong></div>
+					<div><span>Namespaces</span><strong data-map-count="namespaces">0</strong></div>
+					<div><span>Workloads</span><strong data-map-count="workloads">0</strong></div>
+					<div><span>Pods</span><strong data-map-count="pods">0</strong></div>
+					<div><span>Services</span><strong data-map-count="services">0</strong></div>
+					<div><span>Warnings</span><strong data-map-count="warnings">0</strong></div>
+				</div>
+			</div>
+		}
+	</section>
+}
+
+templ MapClusterPickerView(state PageState) {
+	<section class="cluster-filter-bar" aria-label="Map cluster">
+		for _, cluster := range state.Clusters {
+			<button { mapClusterSelectAttrs(cluster, mapClusterContext(state) == cluster.ContextName && !mapHasMultipleClusterSelection(state))... }>
+				<span class="icon-[lucide--server]" aria-hidden="true"></span>
+				<span>{ cluster.ContextName }</span>
+			</button>
+		}
+	</section>
+}

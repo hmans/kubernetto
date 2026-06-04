@@ -166,13 +166,20 @@ func isActionItems(state PageState) bool {
 	return state.Signals.Resource == string(kube.KindActions)
 }
 
+func isMap(state PageState) bool {
+	return state.Signals.Resource == string(kube.KindMap)
+}
+
 func isStandalonePage(state PageState) bool {
-	return isOverview(state) || isActionItems(state)
+	return isOverview(state) || isMap(state) || isActionItems(state)
 }
 
 func pageTitle(state PageState) string {
 	if isOverview(state) {
 		return "Cluster Dashboard"
+	}
+	if isMap(state) {
+		return "Map"
 	}
 	if isActionItems(state) {
 		return "Issues"
@@ -214,6 +221,9 @@ func tableAutoRefreshAttrs(state PageState) templ.Attributes {
 	if isOverview(state) {
 		return attrs
 	}
+	if isMap(state) {
+		return attrs
+	}
 	if isActionItems(state) {
 		attrs["data-on-interval__duration.10s"] = "@get('/ui/table')"
 		return attrs
@@ -235,6 +245,8 @@ func resourceButtonIconClass(kind kube.ResourceKind) string {
 	switch kind {
 	case kube.KindOverview:
 		return "icon-[uil--dashboard]"
+	case kube.KindMap:
+		return "icon-[lucide--map]"
 	case kube.KindActions:
 		return "icon-[lucide--list-checks]"
 	case kube.KindPods:
@@ -387,6 +399,47 @@ func overviewRefreshAttrs() templ.Attributes {
 		"type":                   "button",
 		"data-indicator:loading": true,
 		"data-on:click":          "@get('/ui/refresh')",
+	}
+}
+
+func mapClusterContext(state PageState) string {
+	if state.Cluster == nil {
+		return ""
+	}
+	return state.Cluster.ContextName
+}
+
+func mapClusterName(state PageState) string {
+	if state.Cluster == nil {
+		return ""
+	}
+	if state.Cluster.ClusterName != "" {
+		return state.Cluster.ClusterName
+	}
+	return state.Cluster.ContextName
+}
+
+func mapHasMultipleClusterSelection(state PageState) bool {
+	return len(selectedClusterContexts(state.Signals.Clusters)) > 1
+}
+
+func mapDataEndpoint(state PageState) string {
+	contextName := mapClusterContext(state)
+	if contextName == "" {
+		return "/ui/map-data"
+	}
+	return "/ui/map-data?context=" + url.QueryEscape(contextName)
+}
+
+func mapClusterSelectAttrs(cluster *kube.Cluster, active bool) templ.Attributes {
+	return templ.Attributes{
+		"type":                   "button",
+		"class":                  clusterFilterClass(active),
+		"aria-pressed":           checkedBool(active),
+		"data-cluster-context":   cluster.ContextName,
+		"data-cluster-selection": cluster.ContextName,
+		"data-indicator:loading": true,
+		"data-on:click":          "$context = " + signalLiteral(cluster.ContextName) + "; $clusters = " + signalLiteral(cluster.ContextName) + "; $resource = 'map'; $namespace = ''; $query = ''; $sortColumn = ''; $sortOrder = ''; $selectedName = ''; $selectedNamespace = ''; $detailMode = 'overview'; @get('/ui/table')",
 	}
 }
 

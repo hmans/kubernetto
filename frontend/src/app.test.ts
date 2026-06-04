@@ -123,3 +123,26 @@ describe("action item URL sync", () => {
     expect(params.get("selectedNamespace")).toBe("default");
   });
 });
+
+describe("map selection history", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    window.history.replaceState({}, "", "/?resource=map&mapSelected=namespace%3Aold");
+  });
+
+  it("handles mapSelected-only popstate without requiring a page reload", () => {
+    document.body.innerHTML = `
+      <button class="resource-child-button" data-resource-kind="map" aria-pressed="true"></button>
+      <div data-cluster-map data-map-selected="namespace:old"></div>
+    `;
+    let selectedId = "";
+    window.addEventListener("kubernetto:map-selection-popstate", ((event: CustomEvent<{ selectedId: string }>) => {
+      selectedId = event.detail.selectedId;
+    }) as EventListener, { once: true });
+
+    window.history.replaceState({}, "", "/?resource=map&mapSelected=namespace%3Anew");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+
+    expect(selectedId).toBe("namespace:new");
+  });
+});
