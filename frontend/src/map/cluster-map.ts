@@ -2479,10 +2479,12 @@ function selectionEffectFor(item: MapLayoutItem) {
   const group = new THREE.Group();
   group.add(...selectionSpotlightFor(item));
   if (item.type === "warning") {
-    const glow = new THREE.Mesh(selectionEffectGeometry(item), warningSelectionMaterial(item, color, false));
-    glow.scale.setScalar(1.08);
+    const scale = instancedBaseScaleFor(item);
+    const glow = new THREE.Mesh(instancedGeometryFor("warning"), warningSelectionMaterial(item, color, false));
+    glow.scale.copy(scale).multiplyScalar(1.015);
     glow.renderOrder = 96;
-    const outline = new THREE.Mesh(selectionEffectGeometry(item), warningSelectionMaterial(item, 0xfff1c4, true));
+    const outline = new THREE.Mesh(instancedGeometryFor("warning"), warningSelectionMaterial(item, 0xfff1c4, true));
+    outline.scale.copy(scale).multiplyScalar(1.022);
     outline.renderOrder = 98;
     group.add(glow, outline);
     group.userData.selectionEffect = true;
