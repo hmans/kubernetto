@@ -860,7 +860,167 @@ class ClusterMapController {
       link.textContent = "Open details";
       summary.append(link);
     }
-    this.inspector.append(summary, this.renderTopologyTree(selectedItem));
+    this.inspector.append(summary, this.renderOperationalInsights(selectedItem), this.renderTopologyTree(selectedItem));
+  }
+
+  private renderOperationalInsights(selectedItem?: MapLayoutItem) {
+    const section = document.createElement("section");
+    section.className = "map-insights";
+    section.setAttribute("aria-label", selectedItem ? `Operational context for ${selectedItem.label}` : "Cluster attention");
+    const header = document.createElement("div");
+    header.className = "map-insights-header";
+    const title = document.createElement("strong");
+    title.textContent = selectedItem ? "Blast radius" : "Needs attention";
+    const subtitle = document.createElement("span");
+    const groups = selectedItem ? this.selectedInsightGroups(selectedItem) : this.clusterInsightGroups();
+    const rowCount = groups.reduce((count, group) => count + group.items.length, 0);
+    subtitle.textContent = selectedItem ? `${rowCount} related` : `${rowCount} signals`;
+    header.append(title, subtitle);
+    section.append(header);
+
+    if (groups.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "map-insights-empty";
+      empty.textContent = selectedItem ? "No immediate operational relationships found." : "No warnings or unhealthy resources in the visible map.";
+      section.append(empty);
+      return section;
+    }
+
+    for (const group of groups) {
+      section.append(this.renderInsightGroup(group.title, group.items));
+    }
+    return section;
+  }
+
+  private renderInsightGroup(title: string, items: MapLayoutItem[]) {
+    const group = document.createElement("div");
+    group.className = "map-insight-group";
+    const header = document.createElement("div");
+    header.className = "map-insight-group-header";
+    const strong = document.createElement("strong");
+    strong.textContent = title;
+    const count = document.createElement("span");
+    count.textContent = String(items.length);
+    header.append(strong, count);
+    group.append(header);
+    for (const item of items.slice(0, 8)) {
+      group.append(this.renderInsightRow(item));
+    }
+    if (items.length > 8) {
+      const more = document.createElement("div");
+      more.className = "map-insight-more";
+      more.textContent = `${items.length - 8} more`;
+      group.append(more);
+    }
+    return group;
+  }
+
+  private renderInsightRow(item: MapLayoutItem) {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = `map-insight-item is-${item.statusKey}`;
+    row.dataset.mapTreeId = item.id;
+    row.title = `${item.label} · ${item.detail}`;
+    const icon = document.createElement("span");
+    icon.className = `map-insight-icon ${treeKindIconClass(item)}`;
+    icon.setAttribute("aria-hidden", "true");
+    const body = document.createElement("span");
+    body.className = "map-insight-body";
+    const name = document.createElement("span");
+    name.className = "map-insight-name";
+    name.textContent = item.label;
+    const detail = document.createElement("span");
+    detail.className = "map-insight-detail";
+    detail.textContent = item.detail;
+    body.append(name, detail);
+    const status = document.createElement("span");
+    status.className = "map-insight-status";
+    status.textContent = statusLabel(item.statusKey);
+    row.append(icon, body, status);
+    return row;
+  }
+
+  private selectedInsightGroups(item: MapLayoutItem) {
+    const byId = new Map(this.currentLayout.map((candidate) => [candidate.id, candidate]));
+    const ownedScope = this.relationshipScopeIds(item, byId);
+    const trafficOutIds = new Set<string>();
+    const trafficInIds = new Set<string>();
+    for (const scopedId of ownedScope) {
+      const scoped = byId.get(scopedId);
+      scoped?.trafficTargetIds.forEach((id) => trafficOutIds.add(id));
+    }
+    for (const candidate of this.currentLayout) {
+      if (ownedScope.has(candidate.id)) {
+        continue;
+      }
+      if (candidate.trafficTargetIds.some((id) => ownedScope.has(id))) {
+        trafficInIds.add(candidate.id);
+      }
+    }
+    const ownerIds = this.currentLayout
+      .filter((candidate) => candidate.ownedIds.includes(item.id) || ((item.type === "pod" || item.type === "warning") && item.targetIds.includes(candidate.id)))
+      .map((candidate) => candidate.id);
+    const warningIds = this.currentLayout
+      .filter((candidate) => candidate.type === "warning" && candidate.targetIds.some((id) => ownedScope.has(id) || trafficOutIds.has(id)))
+      .map((candidate) => candidate.id);
+    const groups = [
+      { title: "Warnings nearby", items: this.itemsForIds(warningIds, byId) },
+      { title: "Owned by", items: this.itemsForIds(ownerIds, byId) },
+      { title: "Owns", items: this.itemsForIds(item.ownedIds, byId) },
+      { title: "Traffic in", items: this.itemsForIds(trafficInIds, byId) },
+      { title: "Traffic out", items: this.itemsForIds(trafficOutIds, byId) },
+    ];
+    return groups.filter((group) => group.items.length > 0);
+  }
+
+  private clusterInsightGroups() {
+    const attention = this.currentLayout
+      .filter((item) => item.statusKey === "danger" || item.statusKey === "warn" || serviceHasNoTargets(item))
+      .sort(compareInsightItems);
+    const warnings = attention.filter((item) => item.type === "warning");
+    const unhealthy = attention.filter((item) => item.type !== "warning" && item.statusKey !== "neutral");
+    const emptyTraffic = attention.filter((item) => serviceHasNoTargets(item));
+    return [
+      { title: "Warnings", items: warnings },
+      { title: "Unhealthy", items: unhealthy },
+      { title: "No traffic targets", items: emptyTraffic },
+    ].filter((group) => group.items.length > 0);
+  }
+
+  private relationshipScopeIds(item: MapLayoutItem, byId: Map<string, MapLayoutItem>) {
+    const scope = new Set<string>([item.id]);
+    const visit = (id: string) => {
+      const current = byId.get(id);
+      if (!current) {
+        return;
+      }
+      for (const childId of current.ownedIds) {
+        if (scope.has(childId)) {
+          continue;
+        }
+        scope.add(childId);
+        visit(childId);
+      }
+    };
+    visit(item.id);
+    return scope;
+  }
+
+  private itemsForIds(ids: Iterable<string>, byId: Map<string, MapLayoutItem>) {
+    const seen = new Set<string>();
+    const items: MapLayoutItem[] = [];
+    for (const id of ids) {
+      if (seen.has(id)) {
+        continue;
+      }
+      const item = byId.get(id);
+      if (!item) {
+        continue;
+      }
+      seen.add(id);
+      items.push(item);
+    }
+    return items.sort(compareInsightItems);
   }
 
   private renderTopologyTree(selectedItem?: MapLayoutItem) {
@@ -1066,13 +1226,18 @@ class ClusterMapController {
       }
     }
     const rect = this.renderer.domElement.getBoundingClientRect();
-    this.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-    this.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-    this.raycaster.setFromCamera(this.pointer, this.camera);
-    const hit = this.raycaster.intersectObjects(this.interactive, true)[0]?.object;
-    const object = hit ? interactiveParent(hit) : null;
+    const object = this.pickObjectAt(event.clientX, event.clientY);
     this.setHovered(object, event.clientX - rect.left, event.clientY - rect.top);
   };
+
+  private pickObjectAt(clientX: number, clientY: number) {
+    const rect = this.renderer.domElement.getBoundingClientRect();
+    this.pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+    this.pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
+    this.raycaster.setFromCamera(this.pointer, this.camera);
+    const hit = this.raycaster.intersectObjects(this.interactive, true)[0]?.object;
+    return hit ? interactiveParent(hit) : null;
+  }
 
   private onPointerUp = () => {
     this.pointerDown = null;
@@ -1090,16 +1255,18 @@ class ClusterMapController {
     this.setHovered(null, 0, 0);
   };
 
-  private onClick = () => {
+  private onClick = (event: MouseEvent) => {
     if (this.pointerMovedSinceDown) {
       this.pointerMovedSinceDown = false;
       return;
     }
-    if (!this.hovered) {
+    const object = this.pickObjectAt(event.clientX, event.clientY);
+    if (!object) {
+      this.setHovered(null, 0, 0);
       this.clearSelection({ pushHistory: true });
       return;
     }
-    const item = this.hovered.userData.item as MapLayoutItem | undefined;
+    const item = object.userData.item as MapLayoutItem | undefined;
     if (item) {
       this.selectItemById(item.id, { pushHistory: true, zoom: true });
     }
@@ -1276,8 +1443,8 @@ class ClusterMapController {
   }
 
   private relatedConnectorIds(item: MapLayoutItem) {
-    const ids = new Set<string>([item.id, ...item.ownedIds, ...item.targetIds]);
-    for (const id of [...item.ownedIds, ...item.targetIds]) {
+    const ids = new Set<string>([item.id, ...item.ownedIds, ...item.targetIds, ...item.trafficTargetIds]);
+    for (const id of [...item.ownedIds, ...item.targetIds, ...item.trafficTargetIds]) {
       const child = this.objectsById.get(id)?.userData.item as MapLayoutItem | undefined;
       if (!child) {
         continue;
@@ -1285,6 +1452,19 @@ class ClusterMapController {
       ids.add(child.id);
       child.ownedIds.forEach((childId) => ids.add(childId));
       child.targetIds.forEach((targetId) => ids.add(targetId));
+      child.trafficTargetIds.forEach((targetId) => ids.add(targetId));
+    }
+    for (const object of this.interactive) {
+      const candidate = object.userData.item as MapLayoutItem | undefined;
+      if (!candidate) {
+        continue;
+      }
+      if (candidate.trafficTargetIds.some((targetId) => ids.has(targetId) || targetId === item.id)) {
+        ids.add(candidate.id);
+      }
+      if (candidate.type === "warning" && candidate.targetIds.some((targetId) => ids.has(targetId))) {
+        ids.add(candidate.id);
+      }
     }
     return ids;
   }
@@ -1942,6 +2122,60 @@ function statusLabel(statusKey: string) {
       return "Ready";
     default:
       return "OK";
+  }
+}
+
+function serviceHasNoTargets(item: MapLayoutItem) {
+  return item.type === "service" && item.detail.includes("0 targets");
+}
+
+function compareInsightItems(left: MapLayoutItem, right: MapLayoutItem) {
+  const statusDelta = insightStatusRank(left) - insightStatusRank(right);
+  if (statusDelta !== 0) {
+    return statusDelta;
+  }
+  const typeDelta = insightTypeRank(left.type) - insightTypeRank(right.type);
+  if (typeDelta !== 0) {
+    return typeDelta;
+  }
+  return left.label.localeCompare(right.label);
+}
+
+function insightStatusRank(item: MapLayoutItem) {
+  if (item.statusKey === "danger") {
+    return 0;
+  }
+  if (item.statusKey === "warn") {
+    return 1;
+  }
+  if (serviceHasNoTargets(item)) {
+    return 2;
+  }
+  if (item.statusKey === "good") {
+    return 4;
+  }
+  return 3;
+}
+
+function insightTypeRank(type: MapItemType) {
+  switch (type) {
+    case "warning":
+      return 0;
+    case "namespace":
+      return 1;
+    case "workload":
+      return 2;
+    case "service":
+      return 3;
+    case "pod":
+      return 4;
+    case "node":
+      return 5;
+    case "category":
+      return 6;
+    case "clusterResource":
+    default:
+      return 7;
   }
 }
 

@@ -841,6 +841,154 @@ select {
   text-decoration: underline;
 }
 
+.map-insights {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.map-insights-header,
+.map-insight-group-header {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.map-insights-header strong,
+.map-insight-group-header strong {
+  min-width: 0;
+  color: var(--text-strong);
+  font-size: 12px;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.map-insights-header span,
+.map-insight-group-header span,
+.map-insight-more,
+.map-insights-empty {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 680;
+}
+
+.map-insight-group {
+  min-width: 0;
+  display: grid;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--panel) 88%, var(--bg));
+}
+
+.map-insight-group-header {
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 94%, var(--bg));
+  padding: 6px 8px;
+}
+
+.map-insight-item {
+  min-width: 0;
+  min-height: 36px;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) 50px;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.map-insight-item:last-child {
+  border-bottom: 0;
+}
+
+.map-insight-item:hover {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.map-insight-icon {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.map-insight-body {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.map-insight-name,
+.map-insight-detail,
+.map-insight-status {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.map-insight-name {
+  color: var(--text-strong);
+  font-size: 12px;
+  font-weight: 720;
+  line-height: 1.2;
+}
+
+.map-insight-detail {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.25;
+}
+
+.map-insight-status {
+  justify-self: end;
+  max-width: 50px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 760;
+  line-height: 1;
+  padding: 4px 6px;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.map-insight-item.is-warn .map-insight-icon,
+.map-insight-item.is-warn .map-insight-status {
+  border-color: color-mix(in srgb, var(--warn) 42%, var(--line));
+  color: var(--warn);
+}
+
+.map-insight-item.is-danger .map-insight-icon,
+.map-insight-item.is-danger .map-insight-status {
+  border-color: color-mix(in srgb, var(--danger) 42%, var(--line));
+  color: var(--danger);
+}
+
+.map-insight-item.is-good .map-insight-status {
+  border-color: color-mix(in srgb, var(--good) 34%, var(--line));
+  color: var(--good);
+}
+
+.map-insight-more,
+.map-insights-empty {
+  padding: 7px 8px;
+}
+
 .map-tree {
   min-width: 0;
   min-height: 0;
