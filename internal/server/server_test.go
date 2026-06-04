@@ -228,6 +228,100 @@ func TestHandleIndexRendersActionItemsPage(t *testing.T) {
 	}
 }
 
+func TestHandleIndexRendersMapPage(t *testing.T) {
+	app := New([]*kube.Cluster{
+		testClusterWithObjects("prod",
+			testNode("prod-node", true),
+			testPod("api", corev1.PodRunning),
+		),
+	}, context.Background(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/?resource=map&query=stale&sortColumn=Name&sortOrder=desc&selectedName=api", nil)
+	res := httptest.NewRecorder()
+
+	app.handleIndex(res, req)
+
+	body := res.Body.String()
+	for _, want := range []string{
+		`data-signals:resource="&#34;map&#34;"`,
+		`data-signals:query="&#34;&#34;"`,
+		`data-resource-kind="map"`,
+		`Cluster Map`,
+		`data-cluster-map`,
+		`data-context="prod"`,
+		`data-endpoint="/ui/map-data?context=prod"`,
+		`data-map-reset`,
+		`data-map-inspector`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("map page did not render %q: %s", want, body)
+		}
+	}
+	if strings.Contains(body, `id="query"`) || strings.Contains(body, `id="namespace"`) {
+		t.Fatalf("map page rendered table controls: %s", body)
+	}
+	if strings.Contains(body, `data-on-interval__duration.5s="@get(&#39;/ui/table&#39;)"`) {
+		t.Fatalf("map page rendered table auto-refresh: %s", body)
+	}
+}
+
+func TestMapPageShowsChooserForMultipleSelectedClusters(t *testing.T) {
+	app := New([]*kube.Cluster{
+		testClusterWithObjects("dev", testNode("dev-node", true)),
+		testClusterWithObjects("prod", testNode("prod-node", true)),
+	}, context.Background(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/?resource=map&clusters=dev,prod", nil)
+	res := httptest.NewRecorder()
+
+	app.handleIndex(res, req)
+
+	body := res.Body.String()
+	if !strings.Contains(body, "Select one cluster to render its topology map.") {
+		t.Fatalf("map page did not render chooser: %s", body)
+	}
+	if strings.Contains(body, `data-cluster-map`) {
+		t.Fatalf("map page rendered map shell for multiple clusters: %s", body)
+	}
+}
+
+func TestHandleMapDataReturnsClusterMapJSON(t *testing.T) {
+	app := New([]*kube.Cluster{
+		testClusterWithObjects("prod",
+			testNode("prod-node", true),
+			testPod("api", corev1.PodRunning),
+		),
+	}, context.Background(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/ui/map-data?context=prod", nil)
+	res := httptest.NewRecorder()
+
+	app.handleMapData(res, req)
+
+	if res.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", res.Code, res.Body.String())
+	}
+	var clusterMap kube.ClusterMap
+	if err := json.NewDecoder(res.Body).Decode(&clusterMap); err != nil {
+		t.Fatalf("decode map data: %v", err)
+	}
+	if clusterMap.Context != "prod" || clusterMap.Counts.Nodes != 1 || clusterMap.Counts.Pods != 1 {
+		t.Fatalf("map data = %#v", clusterMap)
+	}
+}
+
+func TestHandleMapDataRejectsUnknownContext(t *testing.T) {
+	app := New([]*kube.Cluster{testClusterWithObjects("prod")}, context.Background(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/ui/map-data?context=missing", nil)
+	res := httptest.NewRecorder()
+
+	app.handleMapData(res, req)
+
+	if res.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", res.Code)
+	}
+	if !strings.Contains(res.Body.String(), "cluster context not found") {
+		t.Fatalf("body = %s", res.Body.String())
+	}
+}
+
 func TestActionItemsIgnoreSucceededPods(t *testing.T) {
 	app := New([]*kube.Cluster{
 		testClusterWithObjects("prod",

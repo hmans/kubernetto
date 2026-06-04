@@ -1,5 +1,6 @@
 import "./app.css";
 import "./charts";
+import "./map/cluster-map";
 
 const themeKey = "kubernetto-theme";
 const themeOptions = new Set(["auto", "light", "dark"]);
@@ -14,6 +15,7 @@ const urlStateKeys = [
   "selectedName",
   "selectedNamespace",
   "detailMode",
+  "mapSelected",
 ] as const;
 type UrlStateKey = typeof urlStateKeys[number];
 type UrlState = Record<UrlStateKey, string>;
@@ -33,6 +35,7 @@ const defaultUrlState: UrlState = {
   selectedName: "",
   selectedNamespace: "",
   detailMode: "overview",
+  mapSelected: "",
 };
 let urlSyncTimer = 0;
 let querySyncTimer = 0;
@@ -78,6 +81,7 @@ function readDOMState(): UrlStatePatch {
   const activeSort = document.querySelector<HTMLElement>("th[aria-sort='ascending'] [data-sort-column], th[aria-sort='descending'] [data-sort-column]");
   const selectedRow = document.querySelector<HTMLElement>("tr[data-selected='true'][data-row-name]");
   const activeDetailMode = document.querySelector<HTMLElement>("[data-detail-mode][aria-selected='true']");
+  const mapShell = document.querySelector<HTMLElement>("[data-cluster-map]");
 
   if (context) {
     state.context = context.value;
@@ -112,6 +116,9 @@ function readDOMState(): UrlStatePatch {
   }
   if (activeDetailMode) {
     state.detailMode = activeDetailMode.dataset.detailMode || "overview";
+  }
+  if (mapShell) {
+    state.mapSelected = mapShell.dataset.mapSelected || "";
   }
 
   return normalizeUrlState(state);
@@ -163,6 +170,9 @@ function normalizeUrlState(state: UrlStatePatch): UrlState {
   }
   if (!next.resource) {
     next.resource = defaultUrlState.resource;
+  }
+  if (next.resource !== "map") {
+    next.mapSelected = "";
   }
   return next;
 }
@@ -217,6 +227,32 @@ function nextSortState(column: string): Pick<UrlState, "sortColumn" | "sortOrder
     return { sortColumn: column, sortOrder: "desc" };
   }
   return { sortColumn: "", sortOrder: "" };
+}
+
+function handleMapSelectionPopstate(): boolean {
+  const mapShell = document.querySelector<HTMLElement>("[data-cluster-map]");
+  if (!mapShell) {
+    return false;
+  }
+  const nextState = readUrlState();
+  const currentState = normalizeUrlState({ ...readUrlState(), ...readDOMState() });
+  if (nextState.resource !== "map" || currentState.resource !== "map") {
+    return false;
+  }
+  for (const key of urlStateKeys) {
+    if (key !== "mapSelected" && nextState[key] !== currentState[key]) {
+      return false;
+    }
+  }
+  window.dispatchEvent(new CustomEvent("kubernetto:map-selection-popstate", {
+    detail: { selectedId: nextState.mapSelected },
+  }));
+  return true;
+}
+
+function restorePageFromHistory() {
+  restoringHistory = true;
+  window.location.reload();
 }
 
 function eventElement(event: Event): Element | null {
@@ -523,6 +559,7 @@ document.addEventListener("click", (event) => {
         sortOrder: "",
         selectedName: "",
         selectedNamespace: "",
+        mapSelected: "",
         detailMode: "overview",
       }, { mode: "push" });
     } else {
@@ -536,6 +573,7 @@ document.addEventListener("click", (event) => {
         sortOrder: "",
         selectedName: "",
         selectedNamespace: "",
+        mapSelected: "",
         detailMode: "overview",
       }, { mode: "push" });
     }
@@ -545,14 +583,21 @@ document.addEventListener("click", (event) => {
   const resourceButton = target.closest<HTMLElement>("[data-resource-kind]");
   if (resourceButton) {
     applyOptimisticResourceNav(resourceButton);
+    const resourceKind = resourceButton.dataset.resourceKind || defaultUrlState.resource;
     const patch: UrlStatePatch = {
-      resource: resourceButton.dataset.resourceKind || defaultUrlState.resource,
+      resource: resourceKind,
       sortColumn: "",
       sortOrder: "",
       selectedName: "",
       selectedNamespace: "",
+      mapSelected: "",
       detailMode: "overview",
     };
+    if (resourceKind === "map") {
+      patch.query = "";
+    } else {
+      patch.mapSelected = "";
+    }
     if (resourceButton.dataset.resourceScope === "cluster") {
       patch.namespace = "";
     }
@@ -566,6 +611,7 @@ document.addEventListener("click", (event) => {
       clusters: clusterSelectionUrlValue(clusterButton.dataset.clusterSelection || ""),
       selectedName: "",
       selectedNamespace: "",
+      mapSelected: "",
       detailMode: "overview",
     }, { mode: "push" });
     return;
@@ -577,6 +623,7 @@ document.addEventListener("click", (event) => {
       ...nextSortState(sortButton.dataset.sortColumn || ""),
       selectedName: "",
       selectedNamespace: "",
+      mapSelected: "",
       detailMode: "overview",
     }, { mode: "push" });
     return;
@@ -587,6 +634,7 @@ document.addEventListener("click", (event) => {
     const patch: UrlStatePatch = {
       selectedName: row.dataset.rowName || "",
       selectedNamespace: row.dataset.rowNamespace || "",
+      mapSelected: "",
       detailMode: "overview",
     };
     if (row.dataset.rowCluster) {
@@ -597,7 +645,7 @@ document.addEventListener("click", (event) => {
   }
 
   if (target.closest("[data-close-detail]")) {
-    syncUrlState({ selectedName: "", selectedNamespace: "", detailMode: "overview" }, { mode: "push" });
+    syncUrlState({ selectedName: "", selectedNamespace: "", mapSelected: "", detailMode: "overview" }, { mode: "push" });
     return;
   }
 
@@ -677,6 +725,7 @@ document.addEventListener("keydown", (event) => {
   const patch: UrlStatePatch = {
     selectedName: row.dataset.rowName || "",
     selectedNamespace: row.dataset.rowNamespace || "",
+    mapSelected: "",
     detailMode: "overview",
   };
   if (row.dataset.rowCluster) {
@@ -698,6 +747,7 @@ document.addEventListener("change", (event) => {
       sortOrder: "",
       selectedName: "",
       selectedNamespace: "",
+      mapSelected: "",
       detailMode: "overview",
     }, { mode: "push" });
   } else if (target.matches("#namespace")) {
@@ -705,6 +755,7 @@ document.addEventListener("change", (event) => {
       namespace: target.value,
       selectedName: "",
       selectedNamespace: "",
+      mapSelected: "",
       detailMode: "overview",
     }, { mode: "push" });
   }
@@ -725,16 +776,19 @@ document.addEventListener("input", (event) => {
       query: target.value,
       selectedName: "",
       selectedNamespace: "",
+      mapSelected: "",
       detailMode: "overview",
     }, { mode: "push" });
   }, 250);
 });
 
 window.addEventListener("popstate", () => {
-  restoringHistory = true;
   window.clearTimeout(urlSyncTimer);
   window.clearTimeout(querySyncTimer);
-  window.location.reload();
+  if (handleMapSelectionPopstate()) {
+    return;
+  }
+  restorePageFromHistory();
 });
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -749,7 +803,7 @@ document.addEventListener("DOMContentLoaded", () => {
       attributes: true,
       childList: true,
       subtree: true,
-      attributeFilter: ["aria-pressed", "aria-selected", "aria-sort", "data-selected", "disabled"],
+      attributeFilter: ["aria-pressed", "aria-selected", "aria-sort", "data-map-selected", "data-selected", "disabled"],
     });
   }
 

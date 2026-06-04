@@ -75,6 +75,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /ui/table", s.handleTable)
 	mux.HandleFunc("GET /ui/selection", s.handleSelection)
 	mux.HandleFunc("GET /ui/detail", s.handleDetail)
+	mux.HandleFunc("GET /ui/map-data", s.handleMapData)
 	mux.HandleFunc("GET /ui/charts/prometheus", s.handlePrometheusChart)
 	mux.Handle("POST /api/", http.StripPrefix("/api", s.apiRoutes()))
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
@@ -142,6 +143,29 @@ func (s *Server) handleDetail(w http.ResponseWriter, r *http.Request) {
 	sse := datastar.NewSSE(w, r)
 	s.patchSignals(sse, state.Signals)
 	s.patchElements(sse, "detail", ui.RenderFragment(ui.DetailView(state)))
+}
+
+func (s *Server) handleMapData(w http.ResponseWriter, r *http.Request) {
+	contextName := r.URL.Query().Get("context")
+	if contextName == "" {
+		contextName = s.defaultContext
+	}
+	session := s.exactSession(contextName)
+	if session == nil || session.cluster == nil {
+		writeCompressedJSON(w, r, http.StatusNotFound, map[string]string{"error": "cluster context not found"})
+		return
+	}
+	if session.store == nil {
+		writeCompressedJSON(w, r, http.StatusServiceUnavailable, map[string]string{"error": "No Kubernetes client is configured."})
+		return
+	}
+	s.waitForInitialSync(session)
+	data, err := session.store.ClusterMap()
+	if err != nil {
+		writeCompressedJSON(w, r, http.StatusServiceUnavailable, map[string]string{"error": err.Error()})
+		return
+	}
+	writeCompressedJSON(w, r, http.StatusOK, data)
 }
 
 func (s *Server) handlePrometheusChart(w http.ResponseWriter, r *http.Request) {
@@ -213,6 +237,9 @@ func (s *Server) state(signals ui.Signals) ui.PageState {
 		signals.SelectedNamespace = ""
 		signals.SortColumn = ""
 		signals.SortOrder = ""
+	}
+	if kind == kube.KindMap {
+		signals.Query = ""
 	}
 	activeContexts := s.activeContexts(signals.Clusters)
 	signals.Clusters = strings.Join(s.selectedContexts(signals.Clusters), ",")
@@ -342,6 +369,22 @@ func (s *Server) session(contextName string) *clusterSession {
 	}
 	session := s.ensureStore(contextName)
 	s.waitForInitialSync(session)
+	return session
+}
+
+func (s *Server) exactSession(contextName string) *clusterSession {
+	if contextName == "" {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session := s.clustersByName[contextName]
+	if session == nil {
+		return nil
+	}
+	s.ensureSessionStore(session)
 	return session
 }
 
@@ -753,7 +796,7 @@ func fleetStatusRank(statusKey string) int {
 }
 
 func isStandalonePageKind(kind kube.ResourceKind) bool {
-	return kind == kube.KindOverview || kind == kube.KindActions
+	return kind == kube.KindOverview || kind == kube.KindMap || kind == kube.KindActions
 }
 
 func (s *Server) table(kind kube.ResourceKind, namespace, query, sortColumn, sortOrder string, contexts []string) kube.Table {

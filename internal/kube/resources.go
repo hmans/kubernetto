@@ -29,6 +29,7 @@ type ResourceKind string
 
 const (
 	KindOverview                        ResourceKind = "overview"
+	KindMap                             ResourceKind = "map"
 	KindActions                         ResourceKind = "actions"
 	KindPods                            ResourceKind = "pods"
 	KindDeployments                     ResourceKind = "deployments"
@@ -84,6 +85,7 @@ type ResourceGroupDef struct {
 
 var ResourceDefs = []ResourceDef{
 	{Kind: KindOverview, Label: "Overview", Scope: "cluster", Group: "overview", Default: true},
+	{Kind: KindMap, Label: "Map", Scope: "cluster", Group: "overview"},
 	{Kind: KindActions, Label: "Issues", Scope: "cluster", Group: "overview"},
 	{Kind: KindPods, Label: "Pods", Scope: "namespaced", Group: "workloads", Default: true},
 	{Kind: KindDeployments, Label: "Deployments", Scope: "namespaced", Group: "workloads"},
@@ -123,7 +125,7 @@ var ResourceDefs = []ResourceDef{
 }
 
 var ResourceGroups = []ResourceGroupDef{
-	{ID: "overview", Label: "Overview", DefaultKind: KindOverview, Kinds: []ResourceKind{KindOverview, KindActions}},
+	{ID: "overview", Label: "Overview", DefaultKind: KindOverview, Kinds: []ResourceKind{KindOverview, KindMap, KindActions}},
 	{ID: "workloads", Label: "Workloads", DefaultKind: KindPods, Kinds: []ResourceKind{KindPods, KindDeployments, KindStatefulSet, KindDaemonSet, KindReplicaSets, KindJobs, KindCronJobs}},
 	{ID: "storage", Label: "Storage", DefaultKind: KindPersistentVolumeClaims, Kinds: []ResourceKind{KindPersistentVolumeClaims, KindPersistentVolumes, KindStorageClasses}},
 	{ID: "network", Label: "Network", DefaultKind: KindServices, Kinds: []ResourceKind{KindServices, KindEndpoints, KindEndpointSlices, KindIngresses, KindIngressClasses, KindNetworkPolicies}},
