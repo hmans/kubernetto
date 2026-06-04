@@ -2523,55 +2523,79 @@ function selectionEffectFor(item: MapLayoutItem) {
 }
 
 function selectionSpotlightFor(item: MapLayoutItem) {
-  const radius = THREE.MathUtils.clamp(item.size * 1.35, 1.1, 5.4);
-  const height = THREE.MathUtils.clamp(item.size * 4.4, 8.5, 20);
-  const bottomRadius = radius * 1.18;
-  const topRadius = radius * 0.22;
-  const beamGeometry = new THREE.CylinderGeometry(topRadius, bottomRadius, height, 32, 1, true);
-  const beam = new THREE.Mesh(beamGeometry, spotlightBeamMaterial(topRadius, bottomRadius));
-  beam.position.y = height * 0.5 + Math.max(0.4, item.size * 0.18);
-  beam.renderOrder = 94;
-  beam.userData.excludeFromBokehDepth = true;
+  const broad = item.type === "namespace" || item.type === "category";
+  const radius = broad ? THREE.MathUtils.clamp(item.size * 0.92, 4.5, 16) : THREE.MathUtils.clamp(item.size * 1.45, 1.5, 6.2);
+  const height = broad ? THREE.MathUtils.clamp(item.size * 2.2, 12, 28) : THREE.MathUtils.clamp(item.size * 5, 9, 22);
+  const bottomRadius = radius * (broad ? 1.08 : 1.22);
+  const topRadius = radius * (broad ? 0.26 : 0.18);
+  const effects: THREE.Object3D[] = [];
+  const sheetCount = broad ? 3 : 4;
+  for (let index = 0; index < sheetCount; index += 1) {
+    const sheet = new THREE.Mesh(
+      spotlightSheetGeometry(bottomRadius * 2, topRadius * 2, height),
+      spotlightBeamMaterial(broad ? 0.46 : 0.68),
+    );
+    sheet.rotation.y = (index / sheetCount) * Math.PI;
+    sheet.position.y = Math.max(0.22, item.size * 0.12);
+    sheet.renderOrder = 94;
+    sheet.userData.excludeFromBokehDepth = true;
+    effects.push(sheet);
+  }
 
-  const haloGeometry = new THREE.CircleGeometry(bottomRadius * 1.1, 48);
+  const haloGeometry = new THREE.CircleGeometry(bottomRadius * 1.18, 64);
   const halo = new THREE.Mesh(haloGeometry, spotlightHaloMaterial());
   halo.rotation.x = -Math.PI / 2;
   halo.position.y = 0.035;
   halo.renderOrder = 95;
   halo.userData.excludeFromBokehDepth = true;
-  return [beam, halo];
+  effects.push(halo);
+  return effects;
 }
 
-function spotlightBeamMaterial(topRadius: number, bottomRadius: number) {
+function spotlightSheetGeometry(bottomWidth: number, topWidth: number, height: number) {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(new Float32Array([
+    -bottomWidth * 0.5, 0, 0,
+    bottomWidth * 0.5, 0, 0,
+    -topWidth * 0.5, height, 0,
+    topWidth * 0.5, height, 0,
+  ]), 3));
+  geometry.setAttribute("uv", new THREE.BufferAttribute(new Float32Array([
+    0, 0,
+    1, 0,
+    0, 1,
+    1, 1,
+  ]), 2));
+  geometry.setIndex([0, 1, 2, 2, 1, 3]);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
+function spotlightBeamMaterial(intensity: number) {
   const material = new THREE.ShaderMaterial({
     uniforms: {
       spotlightTime: { value: 0 },
-      topRadius: { value: topRadius },
-      bottomRadius: { value: bottomRadius },
+      spotlightIntensity: { value: intensity },
     },
     vertexShader: `
-      varying vec3 vSpotPosition;
       varying vec2 vSpotUv;
       void main() {
-        vSpotPosition = position;
         vSpotUv = uv;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
       }
     `,
     fragmentShader: `
       uniform float spotlightTime;
-      uniform float topRadius;
-      uniform float bottomRadius;
-      varying vec3 vSpotPosition;
+      uniform float spotlightIntensity;
       varying vec2 vSpotUv;
       void main() {
-        float localRadius = mix(bottomRadius, topRadius, vSpotUv.y);
-        float radial = length(vSpotPosition.xz) / max(localRadius, 0.001);
-        float edge = 1.0 - smoothstep(0.36, 1.0, radial);
-        float vertical = smoothstep(0.0, 0.22, vSpotUv.y) * (1.0 - smoothstep(0.86, 1.0, vSpotUv.y));
-        float scan = sin(vSpotUv.y * 28.0 - spotlightTime * 1.7) * 0.035;
-        float alpha = max(0.0, edge * vertical * (0.18 + scan));
-        vec3 color = mix(vec3(0.52, 1.0, 0.9), vec3(0.98, 1.0, 0.88), edge);
+        float side = abs(vSpotUv.x - 0.5) * 2.0;
+        float core = 1.0 - smoothstep(0.0, 0.72, side);
+        float edge = 1.0 - smoothstep(0.58, 1.0, side);
+        float vertical = smoothstep(0.0, 0.18, vSpotUv.y) * (1.0 - smoothstep(0.84, 1.0, vSpotUv.y));
+        float scan = sin(vSpotUv.y * 24.0 - spotlightTime * 1.55) * 0.026;
+        float alpha = max(0.0, (core * 0.12 + edge * 0.04 + scan) * vertical * spotlightIntensity);
+        vec3 color = mix(vec3(0.42, 1.0, 0.84), vec3(1.0, 0.98, 0.82), core);
         gl_FragColor = vec4(color, alpha);
       }
     `,
@@ -2605,8 +2629,8 @@ function spotlightHaloMaterial() {
         float radial = length(point) * 2.0;
         float core = 1.0 - smoothstep(0.0, 0.46, radial);
         float ring = 1.0 - smoothstep(0.68, 1.0, radial);
-        float pulse = sin(spotlightTime * 1.8) * 0.025;
-        float alpha = (core * 0.16 + ring * 0.08 + pulse) * (1.0 - smoothstep(0.92, 1.0, radial));
+        float pulse = sin(spotlightTime * 1.8) * 0.018;
+        float alpha = (core * 0.13 + ring * 0.07 + pulse) * (1.0 - smoothstep(0.92, 1.0, radial));
         gl_FragColor = vec4(0.72, 1.0, 0.9, max(alpha, 0.0));
       }
     `,
