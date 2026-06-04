@@ -3,15 +3,19 @@ go = "1.26.4"
 node = "latest"
 pnpm = "latest"
 
+[tasks.assets]
+description = "Build frontend assets"
+run = "pnpm build:assets"
+
 [tasks.dev]
 description = "Run Kubernetto"
-raw_args = true
-run = "exec go run ./cmd/kubernetto"
+depends = ["assets"]
+run = "exec go run ./cmd/kubernetto --port \"${KUBERNETTO_PORT:-${CONDUCTOR_PORT:-9832}}\""
 
 [tasks.build]
 description = "Build Kubernetto"
+depends = ["assets"]
 run = """
-pnpm build:assets
 go generate ./...
 go build -o ./kubernetto ./cmd/kubernetto
 """
