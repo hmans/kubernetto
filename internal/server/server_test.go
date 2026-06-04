@@ -97,6 +97,9 @@ func TestRoutesSetTightenedSecurityHeaders(t *testing.T) {
 	if !strings.Contains(csp, "script-src 'self' 'unsafe-eval'") {
 		t.Fatalf("csp script-src = %q, want self with Datastar eval allowance", csp)
 	}
+	if !strings.Contains(csp, "style-src 'self' 'unsafe-inline'") {
+		t.Fatalf("csp style-src = %q, want self with inline style allowance", csp)
+	}
 	if strings.Contains(csp, "cdn.jsdelivr.net") {
 		t.Fatalf("csp still allows jsDelivr: %q", csp)
 	}
