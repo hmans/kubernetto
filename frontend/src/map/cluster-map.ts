@@ -2524,21 +2524,21 @@ function selectionEffectFor(item: MapLayoutItem) {
 
 function selectionSpotlightFor(item: MapLayoutItem) {
   const broad = item.type === "namespace" || item.type === "category";
-  const radius = broad ? THREE.MathUtils.clamp(item.size * 0.42, 2.4, 7.2) : THREE.MathUtils.clamp(item.size * 1.45, 1.5, 6.2);
-  const height = broad ? THREE.MathUtils.clamp(item.size * 2.7, 16, 34) : THREE.MathUtils.clamp(item.size * 5, 9, 22);
+  const radius = broad ? THREE.MathUtils.clamp(item.size * 0.26, 1.6, 3.8) : THREE.MathUtils.clamp(item.size * 1.45, 1.5, 6.2);
+  const height = broad ? THREE.MathUtils.clamp(item.size * 0.82, 5.5, 10) : THREE.MathUtils.clamp(item.size * 5, 9, 22);
   const bottomRadius = radius * (broad ? 1.08 : 1.22);
   const topRadius = radius * (broad ? 0.26 : 0.18);
   const haloRadius = broad ? item.size * 1.18 : bottomRadius * 1.18;
   const baseY = Math.max(0.42, item.size * 0.18);
   const target = new THREE.Vector3(0, baseY, 0);
   const source = broad
-    ? new THREE.Vector3(-height * 0.52, height * 0.9, -height * 0.24)
+    ? new THREE.Vector3(-height * 0.22, height * 0.64, -height * 0.12)
     : new THREE.Vector3(-height * 0.36, height * 0.92, -height * 0.18);
   const effects: THREE.Object3D[] = [];
   const outerHeight = target.distanceTo(source);
   const outerVolume = new THREE.Mesh(
     new THREE.CylinderGeometry(topRadius, bottomRadius, outerHeight, 72, 14, false),
-    spotlightVolumeMaterial(broad ? 5.4 : 2.7, 0.62, bottomRadius, topRadius, outerHeight),
+    spotlightVolumeMaterial(broad ? 0.32 : 1.15, 0.42, bottomRadius, topRadius, outerHeight, broad ? 0.12 : 1),
   );
   placeSpotlightVolume(outerVolume, target, source);
   outerVolume.renderOrder = 102;
@@ -2550,26 +2550,28 @@ function selectionSpotlightFor(item: MapLayoutItem) {
   const innerHeight = innerTarget.distanceTo(innerSource);
   const innerVolume = new THREE.Mesh(
     new THREE.CylinderGeometry(topRadius * 0.42, bottomRadius * 0.42, innerHeight, 48, 10, false),
-    spotlightVolumeMaterial(broad ? 3.8 : 1.9, 1, bottomRadius * 0.42, topRadius * 0.42, innerHeight),
+    spotlightVolumeMaterial(broad ? 0.18 : 0.82, 0.68, bottomRadius * 0.42, topRadius * 0.42, innerHeight, broad ? 0.08 : 1),
   );
   placeSpotlightVolume(innerVolume, innerTarget, innerSource);
   innerVolume.renderOrder = 103;
   innerVolume.userData.excludeFromBokehDepth = true;
   effects.push(innerVolume);
 
-  const coreTarget = target.clone().lerp(source, 0.04);
-  const coreSource = target.clone().lerp(source, 0.96);
-  const coreHeight = coreTarget.distanceTo(coreSource);
-  const coreBottomRadius = broad ? bottomRadius * 0.24 : bottomRadius * 0.3;
-  const coreTopRadius = broad ? Math.max(topRadius * 0.22, 0.42) : Math.max(topRadius * 0.28, 0.26);
-  const coreVolume = new THREE.Mesh(
-    new THREE.CylinderGeometry(coreTopRadius, coreBottomRadius, coreHeight, 40, 8, false),
-    spotlightBeamMaterial(broad ? 2.4 : 1.9, coreBottomRadius, coreTopRadius, coreHeight),
-  );
-  placeSpotlightVolume(coreVolume, coreTarget, coreSource);
-  coreVolume.renderOrder = 104;
-  coreVolume.userData.excludeFromBokehDepth = true;
-  effects.push(coreVolume);
+  if (!broad) {
+    const coreTarget = target.clone().lerp(source, 0.04);
+    const coreSource = target.clone().lerp(source, 0.96);
+    const coreHeight = coreTarget.distanceTo(coreSource);
+    const coreBottomRadius = bottomRadius * 0.18;
+    const coreTopRadius = Math.max(topRadius * 0.18, 0.18);
+    const coreVolume = new THREE.Mesh(
+      new THREE.CylinderGeometry(coreTopRadius, coreBottomRadius, coreHeight, 40, 8, false),
+      spotlightBeamMaterial(0.58, coreBottomRadius, coreTopRadius, coreHeight),
+    );
+    placeSpotlightVolume(coreVolume, coreTarget, coreSource);
+    coreVolume.renderOrder = 104;
+    coreVolume.userData.excludeFromBokehDepth = true;
+    effects.push(coreVolume);
+  }
 
   const haloGeometry = new THREE.CircleGeometry(haloRadius, 64);
   const halo = new THREE.Mesh(haloGeometry, spotlightHaloMaterial());
@@ -2595,7 +2597,14 @@ function placeSpotlightVolume(mesh: THREE.Mesh, target: THREE.Vector3, source: T
   };
 }
 
-function spotlightVolumeMaterial(intensity: number, core: number, bottomRadius: number, topRadius: number, height: number) {
+function spotlightVolumeMaterial(
+  intensity: number,
+  core: number,
+  bottomRadius: number,
+  topRadius: number,
+  height: number,
+  surfaceScale = 1,
+) {
   const material = new THREE.ShaderMaterial({
     uniforms: {
       spotlightTime: { value: 0 },
@@ -2604,6 +2613,7 @@ function spotlightVolumeMaterial(intensity: number, core: number, bottomRadius: 
       spotlightBottomRadius: { value: bottomRadius },
       spotlightTopRadius: { value: topRadius },
       spotlightHeight: { value: height },
+      spotlightSurfaceScale: { value: surfaceScale },
       spotlightWorldToLocal: { value: new THREE.Matrix4() },
     },
     vertexShader: `
@@ -2624,6 +2634,7 @@ function spotlightVolumeMaterial(intensity: number, core: number, bottomRadius: 
       uniform float spotlightBottomRadius;
       uniform float spotlightTopRadius;
       uniform float spotlightHeight;
+      uniform float spotlightSurfaceScale;
       uniform mat4 spotlightWorldToLocal;
       varying vec3 vSpotLocalPosition;
       varying vec3 vSpotWorldPosition;
@@ -2665,9 +2676,9 @@ function spotlightVolumeMaterial(intensity: number, core: number, bottomRadius: 
           float vertical = smoothstep(0.0, 0.07, y01) * (1.0 - smoothstep(0.9, 1.0, y01));
           float haze = spotNoise(local.xz * 0.18 + vec2(local.y * 0.055 - spotlightTime * 0.1, spotlightTime * 0.06));
           float bands = sin(local.y * 0.9 - spotlightTime * 1.05 + haze * 2.8) * 0.5 + 0.5;
-          float density = inside * vertical * (0.075 + coreBeam * spotlightCore * 0.42 + shoulder * 0.16 + haze * 0.075 + bands * 0.05);
-          float alphaStep = density * stepLength * 0.14 * spotlightIntensity * (1.0 - accumulatedAlpha);
-          vec3 stepColor = mix(vec3(0.46, 1.0, 0.86), vec3(1.0, 0.98, 0.75), coreBeam * spotlightCore + bands * 0.12);
+          float density = inside * vertical * spotlightSurfaceScale * (0.045 + coreBeam * spotlightCore * 0.2 + shoulder * 0.08 + haze * 0.045 + bands * 0.025);
+          float alphaStep = density * stepLength * 0.08 * spotlightIntensity * (1.0 - accumulatedAlpha);
+          vec3 stepColor = mix(vec3(0.34, 0.98, 0.78), vec3(0.78, 1.0, 0.86), coreBeam * spotlightCore + bands * 0.08);
           accumulatedColor += stepColor * alphaStep;
           accumulatedAlpha += alphaStep;
         }
@@ -2680,13 +2691,13 @@ function spotlightVolumeMaterial(intensity: number, core: number, bottomRadius: 
         float fresnel = pow(1.0 - abs(dot(normalize(vSpotWorldNormal), viewDirection)), 0.75);
         float surfaceNoise = spotNoise(vSpotLocalPosition.xz * 0.22 + vec2(surfaceY * 2.8 - spotlightTime * 0.08, spotlightTime * 0.05));
         float ribs = pow(sin(surfaceY * 31.0 - spotlightTime * 1.35 + surfaceNoise * 3.2) * 0.5 + 0.5, 2.2);
-        float shell = boundary * surfaceVertical * (0.16 + fresnel * 0.7 + ribs * 0.18);
-        float innerGlow = (1.0 - smoothstep(0.0, 0.72, surfaceRadial)) * surfaceVertical * 0.16;
-        float surfaceAlpha = (shell + innerGlow) * spotlightIntensity;
-        vec3 surfaceColor = mix(vec3(0.5, 1.0, 0.88), vec3(1.0, 0.98, 0.72), 0.34 + spotlightCore * 0.5 + ribs * 0.12);
-        accumulatedColor += surfaceColor * surfaceAlpha * 0.9;
+        float shell = boundary * surfaceVertical * (0.08 + fresnel * 0.3 + ribs * 0.08);
+        float innerGlow = (1.0 - smoothstep(0.0, 0.72, surfaceRadial)) * surfaceVertical * 0.055;
+        float surfaceAlpha = (shell + innerGlow) * spotlightIntensity * spotlightSurfaceScale;
+        vec3 surfaceColor = mix(vec3(0.38, 1.0, 0.82), vec3(0.86, 1.0, 0.86), 0.24 + spotlightCore * 0.28 + ribs * 0.08);
+        accumulatedColor += surfaceColor * surfaceAlpha * 0.65;
         accumulatedAlpha += surfaceAlpha * (1.0 - accumulatedAlpha);
-        gl_FragColor = vec4(accumulatedColor, min(accumulatedAlpha, 0.96));
+        gl_FragColor = vec4(accumulatedColor, min(accumulatedAlpha, 0.18));
       }
     `,
     transparent: true,
@@ -2750,17 +2761,17 @@ function spotlightBeamMaterial(intensity: number, bottomRadius: number, topRadiu
         float fresnel = pow(1.0 - abs(dot(normalize(vSpotWorldNormal), viewDirection)), 0.55);
         float filament = beamNoise(vSpotLocalPosition.xz * 0.8 + vec2(y01 * 7.0 - spotlightTime * 0.22, spotlightTime * 0.11));
         float rib = pow(sin(y01 * 42.0 - spotlightTime * 1.65 + filament * 4.0) * 0.5 + 0.5, 3.0);
-        float body = (0.32 + fresnel * 1.25 + rib * 0.26) * vertical * spotlightIntensity;
-        vec3 color = mix(vec3(0.42, 1.0, 0.86), vec3(1.0, 0.98, 0.72), 0.2 + rib * 0.3);
+        float body = (0.16 + fresnel * 0.58 + rib * 0.12) * vertical * spotlightIntensity;
+        vec3 color = mix(vec3(0.36, 1.0, 0.82), vec3(0.9, 1.0, 0.84), 0.14 + rib * 0.18);
         float alpha = body * (1.0 - smoothstep(0.84, 1.0, radial));
-        gl_FragColor = vec4(color * (1.02 + body * 0.2), min(0.14 + alpha * 0.38, 0.68));
+        gl_FragColor = vec4(color * (0.72 + body * 0.16), min(alpha * 0.42, 0.2));
       }
     `,
     transparent: true,
     depthTest: false,
     depthWrite: false,
     side: THREE.DoubleSide,
-    blending: THREE.NormalBlending,
+    blending: THREE.AdditiveBlending,
   });
   material.userData.spotlightShader = material;
   return material;
