@@ -8,6 +8,7 @@ import (
 	"sort"
 
 	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -17,6 +18,7 @@ import (
 
 type Cluster struct {
 	Clientset      kubernetes.Interface
+	DynamicClient  dynamic.Interface
 	Discovery      discovery.DiscoveryInterface
 	MetricsClient  metricsclient.Interface
 	ContextName    string
@@ -54,12 +56,17 @@ func NewClusters(kubeconfig string) ([]*Cluster, error) {
 	if err != nil {
 		return nil, err
 	}
+	dynamicClient, err := dynamic.NewForConfig(cfg)
+	if err != nil {
+		return nil, err
+	}
 	metricsClient, err := metricsclient.NewForConfig(cfg)
 	if err != nil {
 		return nil, err
 	}
 	return []*Cluster{{
 		Clientset:     clientset,
+		DynamicClient: dynamicClient,
 		Discovery:     clientset.Discovery(),
 		MetricsClient: metricsClient,
 		ContextName:   "in-cluster",
@@ -91,6 +98,10 @@ func fromKubeconfig(rules *clientcmd.ClientConfigLoadingRules, source string) ([
 		if err != nil {
 			return nil, err
 		}
+		dynamicClient, err := dynamic.NewForConfig(cfg)
+		if err != nil {
+			return nil, err
+		}
 		metricsClient, err := metricsclient.NewForConfig(cfg)
 		if err != nil {
 			return nil, err
@@ -111,6 +122,7 @@ func fromKubeconfig(rules *clientcmd.ClientConfigLoadingRules, source string) ([
 
 		clusters = append(clusters, &Cluster{
 			Clientset:      clientset,
+			DynamicClient:  dynamicClient,
 			Discovery:      clientset.Discovery(),
 			MetricsClient:  metricsClient,
 			ContextName:    contextName,

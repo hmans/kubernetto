@@ -99,6 +99,7 @@ type QuickSwitcherItem struct {
 	Context           string
 	Clusters          string
 	Resource          string
+	ResourceScope     string
 	Namespace         string
 	Query             string
 	SortColumn        string
@@ -368,6 +369,8 @@ func resourceGroupIconClass(group ResourceNavGroup) string {
 		return "icon-[uil--setting]"
 	case "cluster":
 		return "icon-[uil--server-network]"
+	case "custom":
+		return "icon-[lucide--blocks]"
 	default:
 		return resourceButtonIconClass(group.Default.Kind)
 	}
@@ -392,6 +395,18 @@ func resourceNavGroups(resources []kube.ResourceDef) []ResourceNavGroup {
 		if navGroup.Default.Kind != "" {
 			groups = append(groups, navGroup)
 		}
+	}
+	customGroup := ResourceNavGroup{ID: "custom", Label: "Custom Resources"}
+	for _, resource := range resources {
+		if resource.Custom || resource.Group == "custom" {
+			customGroup.Resources = append(customGroup.Resources, resource)
+			if customGroup.Default.Kind == "" {
+				customGroup.Default = resource
+			}
+		}
+	}
+	if customGroup.Default.Kind != "" {
+		groups = append(groups, customGroup)
 	}
 	return groups
 }
@@ -475,8 +490,8 @@ func mapClusterSelectAttrs(cluster *kube.Cluster, active bool) templ.Attributes 
 
 func overviewPodUsageLoadAttrs() templ.Attributes {
 	return prometheusChartLoadAttrs(url.Values{
-		"panel":  {"pod-usage-overview"},
-		"limit":  {"8"},
+		"panel": {"pod-usage-overview"},
+		"limit": {"8"},
 	})
 }
 
@@ -963,6 +978,24 @@ func resourceDef(kind kube.ResourceKind) kube.ResourceDef {
 	return kube.ResourceDefs[0]
 }
 
+func normalizeKindForResources(kind string, resources []kube.ResourceDef) kube.ResourceKind {
+	for _, def := range resources {
+		if string(def.Kind) == kind {
+			return def.Kind
+		}
+	}
+	return kube.KindOverview
+}
+
+func resourceDefForResources(kind kube.ResourceKind, resources []kube.ResourceDef) kube.ResourceDef {
+	for _, def := range resources {
+		if def.Kind == kind {
+			return def
+		}
+	}
+	return resourceDef(kind)
+}
+
 func quickSwitcherItems(state PageState) []QuickSwitcherItem {
 	items := []QuickSwitcherItem{}
 	items = append(items, quickSwitcherViewItems(state)...)
@@ -992,17 +1025,18 @@ func quickSwitcherViewItems(state PageState) []QuickSwitcherItem {
 			endpoint = "/ui/refresh"
 		}
 		items = append(items, QuickSwitcherItem{
-			Label:      def.Label,
-			Meta:       resourceQuickSwitcherMeta(def),
-			MetaTokens: resourceQuickSwitcherMetaTokens(def),
-			KindLabel:  "View",
-			Icon:       resourceButtonIconClass(def.Kind),
-			Context:    state.Signals.Context,
-			Clusters:   state.Signals.Clusters,
-			Resource:   string(def.Kind),
-			Namespace:  namespace,
-			DetailMode: "overview",
-			Endpoint:   endpoint,
+			Label:         def.Label,
+			Meta:          resourceQuickSwitcherMeta(def),
+			MetaTokens:    resourceQuickSwitcherMetaTokens(def),
+			KindLabel:     "View",
+			Icon:          resourceButtonIconClass(def.Kind),
+			Context:       state.Signals.Context,
+			Clusters:      state.Signals.Clusters,
+			Resource:      string(def.Kind),
+			ResourceScope: def.Scope,
+			Namespace:     namespace,
+			DetailMode:    "overview",
+			Endpoint:      endpoint,
 		})
 	}
 	return items
@@ -1039,10 +1073,11 @@ func quickSwitcherNamespaceItems(state PageState) []QuickSwitcherItem {
 	if len(state.Namespaces) == 0 {
 		return nil
 	}
-	resource := kube.NormalizeKind(state.Signals.Resource)
-	def := resourceDef(resource)
+	resource := normalizeKindForResources(state.Signals.Resource, state.Resources)
+	def := resourceDefForResources(resource, state.Resources)
 	if def.Scope != "namespaced" || resource == kube.KindActions {
 		resource = kube.KindPods
+		def = resourceDefForResources(resource, state.Resources)
 	}
 	items := make([]QuickSwitcherItem, 0, len(state.Namespaces))
 	for _, namespace := range state.Namespaces {
@@ -1050,18 +1085,19 @@ func quickSwitcherNamespaceItems(state PageState) []QuickSwitcherItem {
 			continue
 		}
 		items = append(items, QuickSwitcherItem{
-			Label:      namespace,
-			Meta:       "Namespace",
-			MetaTokens: []QuickSwitcherMetaToken{{Label: "Namespace", Icon: resourceButtonIconClass(kube.KindNamespaces)}},
-			KindLabel:  "Namespace",
-			Icon:       "icon-[lucide--folder]",
-			Search:     strings.ToLower(namespace + " namespace"),
-			Context:    state.Signals.Context,
-			Clusters:   state.Signals.Clusters,
-			Resource:   string(resource),
-			Namespace:  namespace,
-			DetailMode: "overview",
-			Endpoint:   "/ui/table",
+			Label:         namespace,
+			Meta:          "Namespace",
+			MetaTokens:    []QuickSwitcherMetaToken{{Label: "Namespace", Icon: resourceButtonIconClass(kube.KindNamespaces)}},
+			KindLabel:     "Namespace",
+			Icon:          "icon-[lucide--folder]",
+			Search:        strings.ToLower(namespace + " namespace"),
+			Context:       state.Signals.Context,
+			Clusters:      state.Signals.Clusters,
+			Resource:      string(resource),
+			ResourceScope: def.Scope,
+			Namespace:     namespace,
+			DetailMode:    "overview",
+			Endpoint:      "/ui/table",
 		})
 	}
 	return items
@@ -1083,6 +1119,7 @@ func quickSwitcherActionItems(state PageState) []QuickSwitcherItem {
 			Context:           item.Context,
 			Clusters:          item.Context,
 			Resource:          string(item.TargetKind),
+			ResourceScope:     resourceDef(item.TargetKind).Scope,
 			Query:             item.TargetQuery,
 			SelectedName:      item.TargetName,
 			SelectedNamespace: item.TargetNamespace,
@@ -1107,6 +1144,10 @@ func quickSwitcherRowItems(state PageState) []QuickSwitcherItem {
 		if row.Cluster != "" {
 			contextName = row.Cluster
 		}
+		resourceScope := "cluster"
+		if state.Table.Namespaced {
+			resourceScope = "namespaced"
+		}
 		items = append(items, QuickSwitcherItem{
 			Label:             row.Name,
 			Meta:              quickSwitcherRowMeta(row, state),
@@ -1116,6 +1157,7 @@ func quickSwitcherRowItems(state PageState) []QuickSwitcherItem {
 			Context:           contextName,
 			Clusters:          state.Signals.Clusters,
 			Resource:          string(state.Table.Kind),
+			ResourceScope:     resourceScope,
 			Namespace:         state.Table.Namespace,
 			Query:             state.Signals.Query,
 			SortColumn:        state.Signals.SortColumn,
@@ -1157,7 +1199,11 @@ func quickSwitcherItemAttrs(item QuickSwitcherItem, index int) templ.Attributes 
 	}
 	if item.Resource != "" {
 		attrs["data-resource-kind"] = item.Resource
-		attrs["data-resource-scope"] = resourceDef(kube.NormalizeKind(item.Resource)).Scope
+		scope := item.ResourceScope
+		if scope == "" {
+			scope = resourceDef(kube.NormalizeKind(item.Resource)).Scope
+		}
+		attrs["data-resource-scope"] = scope
 	}
 	return attrs
 }

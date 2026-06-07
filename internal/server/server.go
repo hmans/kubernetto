@@ -213,7 +213,6 @@ func (s *Server) patchElements(sse *datastar.ServerSentEventGenerator, label, el
 }
 
 func (s *Server) state(signals ui.Signals) ui.PageState {
-	kind := kube.NormalizeKind(signals.Resource)
 	namespace := signals.Namespace
 	detailMode := normalizeDetailMode(signals.DetailMode)
 	session := s.session(signals.Context)
@@ -221,8 +220,11 @@ func (s *Server) state(signals ui.Signals) ui.PageState {
 	if session != nil && session.cluster != nil {
 		contextName = session.cluster.ContextName
 	}
+	activeContexts := s.activeContexts(signals.Clusters)
+	resources := s.resourceDefs(activeContexts)
+	kind := normalizeResourceKind(signals.Resource, resources)
 
-	def := resourceDef(kind)
+	def := resourceDef(kind, resources)
 	if def.Scope == "cluster" {
 		namespace = ""
 	}
@@ -241,7 +243,6 @@ func (s *Server) state(signals ui.Signals) ui.PageState {
 	if kind == kube.KindMap {
 		signals.Query = ""
 	}
-	activeContexts := s.activeContexts(signals.Clusters)
 	signals.Clusters = strings.Join(s.selectedContexts(signals.Clusters), ",")
 	if isStandalonePageKind(kind) && len(activeContexts) == 1 {
 		session = s.session(activeContexts[0])
@@ -281,7 +282,7 @@ func (s *Server) state(signals ui.Signals) ui.PageState {
 		Cluster:        sessionCluster(session),
 		Clusters:       s.clusterList(),
 		ActiveContexts: activeContexts,
-		Resources:      kube.ResourceDefs,
+		Resources:      resources,
 		QuickItems:     quickItems,
 		Signals:        ui.Signals{Context: contextName, Clusters: signals.Clusters, Resource: string(kind), Namespace: namespace, Query: signals.Query, SortColumn: table.SortColumn, SortOrder: table.SortOrder, SelectedName: signals.SelectedName, SelectedNamespace: selectedNamespace, DetailMode: detailMode},
 		Summary:        summary,
@@ -659,7 +660,7 @@ func (s *Server) actionItems(contexts []string) ui.ActionList {
 				Detail:      firstNonEmpty(metric.Detail, "Current readiness is degraded."),
 				StatusKey:   metric.StatusKey,
 				TargetKind:  metric.Kind,
-				ActionLabel: "Open " + strings.ToLower(resourceDef(metric.Kind).Label),
+				ActionLabel: "Open " + strings.ToLower(staticResourceDef(metric.Kind).Label),
 			})
 		}
 	}
@@ -802,7 +803,7 @@ func isStandalonePageKind(kind kube.ResourceKind) bool {
 func (s *Server) table(kind kube.ResourceKind, namespace, query, sortColumn, sortOrder string, contexts []string) kube.Table {
 	sessions := s.sessionsForContexts(contexts)
 	s.waitForInitialSyncs(sessions)
-	def := resourceDef(kind)
+	def := resourceDef(kind, s.resourceDefs(contexts))
 	out := kube.Table{
 		Kind:       def.Kind,
 		Label:      def.Label,
@@ -888,6 +889,7 @@ func (s *Server) quickSwitcherObjectItems(signals ui.Signals, contexts []string)
 				Context:           contextName,
 				Clusters:          clusters,
 				Resource:          string(table.Kind),
+				ResourceScope:     def.Scope,
 				Namespace:         namespace,
 				SelectedName:      row.Name,
 				SelectedNamespace: row.Namespace,
@@ -1094,13 +1096,52 @@ func writeCompressedJSON(w http.ResponseWriter, r *http.Request, status int, val
 	_, _ = w.Write(data)
 }
 
-func resourceDef(kind kube.ResourceKind) kube.ResourceDef {
+func normalizeResourceKind(kind string, resources []kube.ResourceDef) kube.ResourceKind {
+	for _, def := range resources {
+		if string(def.Kind) == kind {
+			return def.Kind
+		}
+	}
+	return kube.KindOverview
+}
+
+func resourceDef(kind kube.ResourceKind, resources []kube.ResourceDef) kube.ResourceDef {
+	for _, def := range resources {
+		if def.Kind == kind {
+			return def
+		}
+	}
+	return kube.ResourceDefs[0]
+}
+
+func staticResourceDef(kind kube.ResourceKind) kube.ResourceDef {
 	for _, def := range kube.ResourceDefs {
 		if def.Kind == kind {
 			return def
 		}
 	}
 	return kube.ResourceDefs[0]
+}
+
+func (s *Server) resourceDefs(contexts []string) []kube.ResourceDef {
+	resources := append([]kube.ResourceDef(nil), kube.ResourceDefs...)
+	seen := make(map[kube.ResourceKind]bool, len(resources))
+	for _, def := range resources {
+		seen[def.Kind] = true
+	}
+	for _, session := range s.sessionsForContexts(contexts) {
+		if session.store == nil {
+			continue
+		}
+		for _, def := range session.store.CustomResourceDefs() {
+			if seen[def.Kind] {
+				continue
+			}
+			seen[def.Kind] = true
+			resources = append(resources, def)
+		}
+	}
+	return resources
 }
 
 func withSecurityHeaders(next http.Handler) http.Handler {

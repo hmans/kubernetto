@@ -24,7 +24,7 @@ import (
 )
 
 func (s *ResourceStore) Detail(kind ResourceKind, namespace, name string) ResourceDetail {
-	def := resourceDef(kind)
+	def := s.resourceDef(kind)
 	detail := ResourceDetail{Kind: def.Kind, Label: def.Label, Name: name, Namespace: namespace}
 	if name == "" {
 		return detail
@@ -32,6 +32,9 @@ func (s *ResourceStore) Detail(kind ResourceKind, namespace, name string) Resour
 	if err := s.readinessError(); err != nil {
 		detail.Error = err.Error()
 		return detail
+	}
+	if def.Custom {
+		return s.customResourceDetail(def, namespace, name)
 	}
 
 	switch def.Kind {
