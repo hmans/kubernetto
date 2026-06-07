@@ -25,9 +25,11 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	intstr "k8s.io/apimachinery/pkg/util/intstr"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 	metricsv1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
@@ -733,6 +735,117 @@ func TestResourceStoreTableSortsCountsNumerically(t *testing.T) {
 	table = store.TableWithSort(KindPods, "default", "", "Restarts", "desc")
 	if got := rowNames(table.Rows); !equalStrings(got, []string{"ten", "two", "zero"}) {
 		t.Fatalf("rows sorted by restarts desc = %#v", got)
+	}
+}
+
+func TestResourceStoreCustomResourceTableAndDetail(t *testing.T) {
+	gvr := schema.GroupVersionResource{Group: "stable.example.com", Version: "v1", Resource: "widgets"}
+	kind := CustomResourceID(gvr.Group, gvr.Version, gvr.Resource)
+	widget := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "stable.example.com/v1",
+		"kind":       "Widget",
+		"metadata": map[string]any{
+			"name":              "api",
+			"namespace":         "prod",
+			"creationTimestamp": metav1.Now().Format(time.RFC3339),
+			"labels": map[string]any{
+				"app": "api",
+			},
+		},
+		"spec": map[string]any{
+			"replicas": int64(2),
+		},
+		"status": map[string]any{
+			"phase": "Ready",
+		},
+	}}
+	clientset := fake.NewSimpleClientset(&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "prod"}})
+	cluster := &Cluster{
+		Clientset:     clientset,
+		DynamicClient: dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{gvr: "WidgetList"}, widget),
+		ContextName:   "test",
+		Namespace:     "default",
+	}
+	store := NewResourceStore(cluster, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	store.Start(ctx)
+	syncCtx, syncCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer syncCancel()
+	if !store.WaitForSync(syncCtx) {
+		t.Fatal("store did not sync")
+	}
+	store.customResources = []ResourceDef{{
+		Kind:        kind,
+		Label:       "Widget",
+		Scope:       "namespaced",
+		Group:       "custom",
+		APIGroup:    gvr.Group,
+		APIVersion:  gvr.Version,
+		APIResource: gvr.Resource,
+		ObjectKind:  "Widget",
+		Custom:      true,
+	}}
+
+	table := store.Table(kind, "prod", "")
+	if table.Error != "" {
+		t.Fatalf("table error = %q", table.Error)
+	}
+	if want := []string{"Name", "Namespace", "Status", "Age"}; !equalStrings(table.Columns, want) {
+		t.Fatalf("columns = %#v, want %#v", table.Columns, want)
+	}
+	if len(table.Rows) != 1 || table.Rows[0].Name != "api" || table.Rows[0].Status != "Ready" || table.Rows[0].StatusKey != "good" {
+		t.Fatalf("unexpected rows: %#v", table.Rows)
+	}
+
+	detail := store.Detail(kind, "prod", "api")
+	if detail.Error != "" {
+		t.Fatalf("detail error = %q", detail.Error)
+	}
+	if detail.Label != "Widget" || detail.Name != "api" || detail.Status != "Ready" {
+		t.Fatalf("unexpected detail: %#v", detail)
+	}
+	if !strings.Contains(detail.YAML, "apiVersion: stable.example.com/v1") || !strings.Contains(detail.YAML, "kind: Widget") {
+		t.Fatalf("detail yaml missing identity: %q", detail.YAML)
+	}
+	if got := detailFieldValue(detail.Fields, "Resource"); got != "widgets" {
+		t.Fatalf("detail resource field = %q, want widgets", got)
+	}
+}
+
+func TestCustomResourceDefsFromCRDs(t *testing.T) {
+	defs := customResourceDefsFromCRDs(&unstructured.UnstructuredList{Items: []unstructured.Unstructured{{
+		Object: map[string]any{
+			"apiVersion": "apiextensions.k8s.io/v1",
+			"kind":       "CustomResourceDefinition",
+			"metadata": map[string]any{
+				"name": "widgets.stable.example.com",
+			},
+			"spec": map[string]any{
+				"group": "stable.example.com",
+				"names": map[string]any{
+					"kind":   "Widget",
+					"plural": "widgets",
+				},
+				"scope": "Namespaced",
+				"versions": []any{
+					map[string]any{"name": "v1beta1", "served": true, "storage": false},
+					map[string]any{"name": "v1", "served": true, "storage": true},
+				},
+			},
+		},
+	}}})
+
+	if len(defs) != 1 {
+		t.Fatalf("defs = %d, want 1", len(defs))
+	}
+	def := defs[0]
+	if def.Kind != "custom:stable.example.com/v1/widgets" || def.Label != "Widget" || def.Scope != "namespaced" || !def.Custom {
+		t.Fatalf("unexpected custom resource def: %#v", def)
+	}
+
+	if defs := customResourceDefsFromCRDs(&unstructured.UnstructuredList{}); len(defs) != 0 {
+		t.Fatalf("empty CRD list produced defs: %#v", defs)
 	}
 }
 

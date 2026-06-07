@@ -10,13 +10,17 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"kubernetto/internal/kube"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
 )
 
@@ -383,6 +387,42 @@ func TestHandleIndexRendersGroupedResourceNav(t *testing.T) {
 	}
 	if !strings.Contains(body, `data-resource-group-children="workloads" hidden`) {
 		t.Fatalf("inactive workloads children were not hidden")
+	}
+}
+
+func TestHandleIndexRendersCustomResourceVerticalSlice(t *testing.T) {
+	gvr := schema.GroupVersionResource{Group: "stable.example.com", Version: "v1", Resource: "widgets"}
+	kind := kube.CustomResourceID(gvr.Group, gvr.Version, gvr.Resource)
+	app := New([]*kube.Cluster{testClusterWithCustomResource("test", gvr, &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "stable.example.com/v1",
+		"kind":       "Widget",
+		"metadata": map[string]any{
+			"name":      "api",
+			"namespace": "prod",
+		},
+		"status": map[string]any{
+			"phase": "Ready",
+		},
+	}})}, context.Background(), nil)
+	waitForCustomResource(t, app, kind)
+
+	req := httptest.NewRequest("GET", "/?resource="+url.QueryEscape(string(kind))+"&namespace=prod&selectedName=api&selectedNamespace=prod&detailMode=yaml", nil)
+	res := httptest.NewRecorder()
+
+	app.handleIndex(res, req)
+
+	body := res.Body.String()
+	for _, want := range []string{
+		`data-signals:resource="&#34;custom:stable.example.com/v1/widgets&#34;"`,
+		"stable.example.com",
+		"Widget",
+		"api",
+		"Ready",
+		"apiVersion: stable.example.com/v1",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("index missing %q in body:\n%s", want, body)
+		}
 	}
 }
 
@@ -924,6 +964,68 @@ func testClusterWithObjects(contextName string, extraObjects ...runtime.Object) 
 		ConfigSource: "test",
 		Current:      contextName == "test" || contextName == "dev",
 	}
+}
+
+func testClusterWithCustomResource(contextName string, gvr schema.GroupVersionResource, object *unstructured.Unstructured) *kube.Cluster {
+	clientset := fake.NewSimpleClientset(
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "default"}},
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "prod"}},
+	)
+	crd := testCustomResourceDefinition(gvr, object.GetKind(), object.GetNamespace() != "")
+	return &kube.Cluster{
+		Clientset: clientset,
+		DynamicClient: dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
+			{Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"}: "CustomResourceDefinitionList",
+			gvr: object.GetKind() + "List",
+		}, crd, object),
+		Discovery:    clientset.Discovery(),
+		ContextName:  contextName,
+		ClusterName:  contextName,
+		Namespace:    "default",
+		ConfigSource: "test",
+		Current:      true,
+	}
+}
+
+func testCustomResourceDefinition(gvr schema.GroupVersionResource, kind string, namespaced bool) *unstructured.Unstructured {
+	scope := "Cluster"
+	if namespaced {
+		scope = "Namespaced"
+	}
+	return &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "apiextensions.k8s.io/v1",
+		"kind":       "CustomResourceDefinition",
+		"metadata": map[string]any{
+			"name": gvr.Resource + "." + gvr.Group,
+		},
+		"spec": map[string]any{
+			"group": gvr.Group,
+			"names": map[string]any{
+				"kind":   kind,
+				"plural": gvr.Resource,
+			},
+			"scope": scope,
+			"versions": []any{map[string]any{
+				"name":    gvr.Version,
+				"served":  true,
+				"storage": true,
+			}},
+		},
+	}}
+}
+
+func waitForCustomResource(t *testing.T, app *Server, kind kube.ResourceKind) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		for _, def := range app.resourceDefs([]string{"test"}) {
+			if def.Kind == kind {
+				return
+			}
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("custom resource %q was not discovered", kind)
 }
 
 func testNode(name string, ready bool) *corev1.Node {

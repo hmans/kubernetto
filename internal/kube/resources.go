@@ -22,6 +22,7 @@ import (
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	intstr "k8s.io/apimachinery/pkg/util/intstr"
 )
 
@@ -69,11 +70,16 @@ const (
 )
 
 type ResourceDef struct {
-	Kind    ResourceKind
-	Label   string
-	Scope   string
-	Group   string
-	Default bool
+	Kind        ResourceKind
+	Label       string
+	Scope       string
+	Group       string
+	Default     bool
+	APIGroup    string
+	APIVersion  string
+	APIResource string
+	ObjectKind  string
+	Custom      bool
 }
 
 type ResourceGroupDef struct {
@@ -303,6 +309,35 @@ func NormalizeKind(kind string) ResourceKind {
 		}
 	}
 	return KindOverview
+}
+
+func CustomResourceID(group, version, resource string) ResourceKind {
+	if group == "" || version == "" || resource == "" {
+		return ""
+	}
+	return ResourceKind("custom:" + group + "/" + version + "/" + resource)
+}
+
+func ParseCustomResourceID(kind ResourceKind) (schema.GroupVersionResource, bool) {
+	value := string(kind)
+	if !strings.HasPrefix(value, "custom:") {
+		return schema.GroupVersionResource{}, false
+	}
+	parts := strings.Split(strings.TrimPrefix(value, "custom:"), "/")
+	if len(parts) != 3 || parts[0] == "" || parts[1] == "" || parts[2] == "" {
+		return schema.GroupVersionResource{}, false
+	}
+	return schema.GroupVersionResource{Group: parts[0], Version: parts[1], Resource: parts[2]}, true
+}
+
+func (def ResourceDef) GroupVersionResource() (schema.GroupVersionResource, bool) {
+	if !def.Custom {
+		return schema.GroupVersionResource{}, false
+	}
+	if def.APIGroup != "" && def.APIVersion != "" && def.APIResource != "" {
+		return schema.GroupVersionResource{Group: def.APIGroup, Version: def.APIVersion, Resource: def.APIResource}, true
+	}
+	return ParseCustomResourceID(def.Kind)
 }
 
 func (c *Cluster) Summary(ctx context.Context) Summary {

@@ -62,6 +62,7 @@ type ResourceStore struct {
 	podUsage        map[string]corev1.ResourceList
 	metricsState    MetricsState
 	podUsageHistory map[string][]UsageSample
+	customResources []ResourceDef
 
 	pods                            corelisters.PodLister
 	events                          corelisters.EventLister
@@ -245,6 +246,7 @@ func (s *ResourceStore) Start(ctx context.Context) {
 
 	if s.cluster.Discovery != nil {
 		go s.loadServerVersion(ctx)
+		go s.loadCustomResourceDefs(ctx)
 	}
 	if s.cluster.MetricsClient != nil {
 		go s.pollPodMetrics(ctx, s.cluster.MetricsClient)
@@ -331,7 +333,7 @@ func (s *ResourceStore) Table(kind ResourceKind, namespace, query string) Table 
 }
 
 func (s *ResourceStore) TableWithSort(kind ResourceKind, namespace, query, sortColumn, sortOrder string) Table {
-	def := resourceDef(kind)
+	def := s.resourceDef(kind)
 	table := Table{
 		Kind:       def.Kind,
 		Label:      def.Label,
@@ -344,6 +346,9 @@ func (s *ResourceStore) TableWithSort(kind ResourceKind, namespace, query, sortC
 	if err := s.readinessError(); err != nil {
 		table.Error = err.Error()
 		return table
+	}
+	if def.Custom {
+		return s.customResourceTable(def, namespace, query, sortColumn, sortOrder)
 	}
 
 	switch def.Kind {
