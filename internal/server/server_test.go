@@ -414,7 +414,7 @@ func TestHandleIndexRendersCustomResourceVerticalSlice(t *testing.T) {
 	body := res.Body.String()
 	for _, want := range []string{
 		`data-signals:resource="&#34;custom:stable.example.com/v1/widgets&#34;"`,
-		"Custom Resources",
+		"stable.example.com",
 		"Widget",
 		"api",
 		"Ready",

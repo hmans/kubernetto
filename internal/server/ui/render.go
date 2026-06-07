@@ -10,6 +10,7 @@ import (
 	"io"
 	"math"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -372,6 +373,9 @@ func resourceGroupIconClass(group ResourceNavGroup) string {
 	case "custom":
 		return "icon-[lucide--blocks]"
 	default:
+		if strings.HasPrefix(group.ID, "custom:") {
+			return "icon-[lucide--blocks]"
+		}
 		return resourceButtonIconClass(group.Default.Kind)
 	}
 }
@@ -396,17 +400,39 @@ func resourceNavGroups(resources []kube.ResourceDef) []ResourceNavGroup {
 			groups = append(groups, navGroup)
 		}
 	}
-	customGroup := ResourceNavGroup{ID: "custom", Label: "Custom Resources"}
+	groups = append(groups, customResourceNavGroups(resources)...)
+	return groups
+}
+
+func customResourceNavGroups(resources []kube.ResourceDef) []ResourceNavGroup {
+	byAPIGroup := map[string][]kube.ResourceDef{}
 	for _, resource := range resources {
 		if resource.Custom || resource.Group == "custom" {
-			customGroup.Resources = append(customGroup.Resources, resource)
-			if customGroup.Default.Kind == "" {
-				customGroup.Default = resource
+			apiGroup := resource.APIGroup
+			if apiGroup == "" {
+				apiGroup = "Custom Resources"
 			}
+			byAPIGroup[apiGroup] = append(byAPIGroup[apiGroup], resource)
 		}
 	}
-	if customGroup.Default.Kind != "" {
-		groups = append(groups, customGroup)
+	apiGroups := make([]string, 0, len(byAPIGroup))
+	for apiGroup := range byAPIGroup {
+		apiGroups = append(apiGroups, apiGroup)
+	}
+	sort.Strings(apiGroups)
+	groups := make([]ResourceNavGroup, 0, len(apiGroups))
+	for _, apiGroup := range apiGroups {
+		resources := byAPIGroup[apiGroup]
+		sort.Slice(resources, func(i, j int) bool {
+			return strings.ToLower(resources[i].Label) < strings.ToLower(resources[j].Label)
+		})
+		group := ResourceNavGroup{
+			ID:        "custom:" + apiGroup,
+			Label:     apiGroup,
+			Default:   resources[0],
+			Resources: resources,
+		}
+		groups = append(groups, group)
 	}
 	return groups
 }
