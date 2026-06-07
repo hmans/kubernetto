@@ -11,30 +11,12 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 )
 
 const customResourceGroupID = "custom"
 
-var builtInAPIResourceGroups = map[string]bool{
-	"":                             true,
-	"admissionregistration.k8s.io": true,
-	"apiextensions.k8s.io":         true,
-	"apps":                         true,
-	"autoscaling":                  true,
-	"batch":                        true,
-	"coordination.k8s.io":          true,
-	"discovery.k8s.io":             true,
-	"events.k8s.io":                true,
-	"metrics.k8s.io":               true,
-	"networking.k8s.io":            true,
-	"node.k8s.io":                  true,
-	"policy":                       true,
-	"rbac.authorization.k8s.io":    true,
-	"scheduling.k8s.io":            true,
-	"storage.k8s.io":               true,
-}
+var customResourceDefinitionGVR = schema.GroupVersionResource{Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"}
 
 func (s *ResourceStore) CustomResourceDefs() []ResourceDef {
 	if s == nil {
@@ -60,65 +42,57 @@ func (s *ResourceStore) resourceDef(kind ResourceKind) ResourceDef {
 }
 
 func (s *ResourceStore) loadCustomResourceDefs(ctx context.Context) {
-	if s == nil || s.cluster == nil || s.cluster.Discovery == nil {
+	if s == nil || s.cluster == nil || s.cluster.DynamicClient == nil {
 		return
 	}
-	_, resources, err := discovery.ServerGroupsAndResources(s.cluster.Discovery)
-	if err != nil && len(resources) == 0 {
-		if ctx.Err() == nil && !discovery.IsGroupDiscoveryFailedError(err) {
-			s.logger.Debug("custom resource discovery failed", "error", err)
+	list, err := s.cluster.DynamicClient.Resource(customResourceDefinitionGVR).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		if ctx.Err() == nil {
+			s.logger.Debug("custom resource definition discovery failed", "error", err)
 		}
 		return
 	}
-	defs := customResourceDefsFromDiscovery(resources)
+	defs := customResourceDefsFromCRDs(list)
 	s.mu.Lock()
 	s.customResources = defs
 	s.mu.Unlock()
-	if err != nil && ctx.Err() == nil {
-		s.logger.Debug("custom resource discovery returned partial results", "error", err)
-	}
 }
 
-func customResourceDefsFromDiscovery(resources []*metav1.APIResourceList) []ResourceDef {
-	defs := []ResourceDef{}
+func customResourceDefsFromCRDs(list *unstructured.UnstructuredList) []ResourceDef {
+	if list == nil {
+		return nil
+	}
+	defs := make([]ResourceDef, 0, len(list.Items))
 	seen := map[ResourceKind]bool{}
-	for _, list := range resources {
-		if list == nil {
+	for index := range list.Items {
+		crd := &list.Items[index]
+		group, _, _ := unstructured.NestedString(crd.Object, "spec", "group")
+		plural, _, _ := unstructured.NestedString(crd.Object, "spec", "names", "plural")
+		objectKind, _, _ := unstructured.NestedString(crd.Object, "spec", "names", "kind")
+		version, ok := customResourceServedVersion(crd)
+		if group == "" || plural == "" || objectKind == "" || !ok {
 			continue
 		}
-		gv, err := schema.ParseGroupVersion(list.GroupVersion)
-		if err != nil || builtInAPIResourceGroups[gv.Group] {
+		kind := CustomResourceID(group, version, plural)
+		if kind == "" || seen[kind] {
 			continue
 		}
-		for _, resource := range list.APIResources {
-			if !customAPIResourceSupported(resource) {
-				continue
-			}
-			kind := CustomResourceID(gv.Group, gv.Version, resource.Name)
-			if kind == "" || seen[kind] {
-				continue
-			}
-			seen[kind] = true
-			scope := "cluster"
-			if resource.Namespaced {
-				scope = "namespaced"
-			}
-			label := resource.Kind
-			if label == "" {
-				label = resource.Name
-			}
-			defs = append(defs, ResourceDef{
-				Kind:        kind,
-				Label:       label,
-				Scope:       scope,
-				Group:       customResourceGroupID,
-				APIGroup:    gv.Group,
-				APIVersion:  gv.Version,
-				APIResource: resource.Name,
-				ObjectKind:  resource.Kind,
-				Custom:      true,
-			})
+		seen[kind] = true
+		scope := "cluster"
+		if crdScope, _, _ := unstructured.NestedString(crd.Object, "spec", "scope"); crdScope == "Namespaced" {
+			scope = "namespaced"
 		}
+		defs = append(defs, ResourceDef{
+			Kind:        kind,
+			Label:       objectKind,
+			Scope:       scope,
+			Group:       customResourceGroupID,
+			APIGroup:    group,
+			APIVersion:  version,
+			APIResource: plural,
+			ObjectKind:  objectKind,
+			Custom:      true,
+		})
 	}
 	sort.Slice(defs, func(i, j int) bool {
 		left := strings.ToLower(defs[i].Label + "/" + defs[i].APIGroup + "/" + defs[i].APIResource)
@@ -128,20 +102,34 @@ func customResourceDefsFromDiscovery(resources []*metav1.APIResourceList) []Reso
 	return defs
 }
 
-func customAPIResourceSupported(resource metav1.APIResource) bool {
-	if resource.Name == "" || strings.Contains(resource.Name, "/") {
-		return false
+func customResourceServedVersion(crd *unstructured.Unstructured) (string, bool) {
+	versions, ok, _ := unstructured.NestedSlice(crd.Object, "spec", "versions")
+	if !ok {
+		return "", false
 	}
-	return apiResourceHasVerb(resource, "list") && apiResourceHasVerb(resource, "get")
-}
-
-func apiResourceHasVerb(resource metav1.APIResource, verb string) bool {
-	for _, candidate := range resource.Verbs {
-		if candidate == verb {
-			return true
+	firstServed := ""
+	for _, raw := range versions {
+		version, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		name, _ := version["name"].(string)
+		served, _ := version["served"].(bool)
+		storage, _ := version["storage"].(bool)
+		if name == "" || !served {
+			continue
+		}
+		if firstServed == "" {
+			firstServed = name
+		}
+		if storage {
+			return name, true
 		}
 	}
-	return false
+	if firstServed != "" {
+		return firstServed, true
+	}
+	return "", false
 }
 
 func (s *ResourceStore) customResourceTable(def ResourceDef, namespace, query, sortColumn, sortOrder string) Table {

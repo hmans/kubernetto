@@ -20,7 +20,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	fakediscovery "k8s.io/client-go/discovery/fake"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
 )
@@ -972,26 +971,47 @@ func testClusterWithCustomResource(contextName string, gvr schema.GroupVersionRe
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "default"}},
 		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "prod"}},
 	)
-	discoveryClient := clientset.Discovery().(*fakediscovery.FakeDiscovery)
-	discoveryClient.Resources = []*metav1.APIResourceList{{
-		GroupVersion: gvr.GroupVersion().String(),
-		APIResources: []metav1.APIResource{{
-			Name:       gvr.Resource,
-			Kind:       object.GetKind(),
-			Namespaced: object.GetNamespace() != "",
-			Verbs:      metav1.Verbs{"get", "list"},
-		}},
-	}}
+	crd := testCustomResourceDefinition(gvr, object.GetKind(), object.GetNamespace() != "")
 	return &kube.Cluster{
-		Clientset:     clientset,
-		DynamicClient: dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{gvr: object.GetKind() + "List"}, object),
-		Discovery:     clientset.Discovery(),
-		ContextName:   contextName,
-		ClusterName:   contextName,
-		Namespace:     "default",
-		ConfigSource:  "test",
-		Current:       true,
+		Clientset: clientset,
+		DynamicClient: dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{
+			{Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"}: "CustomResourceDefinitionList",
+			gvr: object.GetKind() + "List",
+		}, crd, object),
+		Discovery:    clientset.Discovery(),
+		ContextName:  contextName,
+		ClusterName:  contextName,
+		Namespace:    "default",
+		ConfigSource: "test",
+		Current:      true,
 	}
+}
+
+func testCustomResourceDefinition(gvr schema.GroupVersionResource, kind string, namespaced bool) *unstructured.Unstructured {
+	scope := "Cluster"
+	if namespaced {
+		scope = "Namespaced"
+	}
+	return &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "apiextensions.k8s.io/v1",
+		"kind":       "CustomResourceDefinition",
+		"metadata": map[string]any{
+			"name": gvr.Resource + "." + gvr.Group,
+		},
+		"spec": map[string]any{
+			"group": gvr.Group,
+			"names": map[string]any{
+				"kind":   kind,
+				"plural": gvr.Resource,
+			},
+			"scope": scope,
+			"versions": []any{map[string]any{
+				"name":    gvr.Version,
+				"served":  true,
+				"storage": true,
+			}},
+		},
+	}}
 }
 
 func waitForCustomResource(t *testing.T, app *Server, kind kube.ResourceKind) {

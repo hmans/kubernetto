@@ -813,6 +813,42 @@ func TestResourceStoreCustomResourceTableAndDetail(t *testing.T) {
 	}
 }
 
+func TestCustomResourceDefsFromCRDs(t *testing.T) {
+	defs := customResourceDefsFromCRDs(&unstructured.UnstructuredList{Items: []unstructured.Unstructured{{
+		Object: map[string]any{
+			"apiVersion": "apiextensions.k8s.io/v1",
+			"kind":       "CustomResourceDefinition",
+			"metadata": map[string]any{
+				"name": "widgets.stable.example.com",
+			},
+			"spec": map[string]any{
+				"group": "stable.example.com",
+				"names": map[string]any{
+					"kind":   "Widget",
+					"plural": "widgets",
+				},
+				"scope": "Namespaced",
+				"versions": []any{
+					map[string]any{"name": "v1beta1", "served": true, "storage": false},
+					map[string]any{"name": "v1", "served": true, "storage": true},
+				},
+			},
+		},
+	}}})
+
+	if len(defs) != 1 {
+		t.Fatalf("defs = %d, want 1", len(defs))
+	}
+	def := defs[0]
+	if def.Kind != "custom:stable.example.com/v1/widgets" || def.Label != "Widget" || def.Scope != "namespaced" || !def.Custom {
+		t.Fatalf("unexpected custom resource def: %#v", def)
+	}
+
+	if defs := customResourceDefsFromCRDs(&unstructured.UnstructuredList{}); len(defs) != 0 {
+		t.Fatalf("empty CRD list produced defs: %#v", defs)
+	}
+}
+
 func syncedTestStore(t *testing.T, clientset *fake.Clientset) *ResourceStore {
 	t.Helper()
 
